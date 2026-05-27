@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "description": "用户可编辑：RSS 订阅源列表。enabled=false 可临时停用某个源。",
+  "sources": [
+    { "name": "Wiley Advanced Science", "url": "https://advanced.onlinelibrary.wiley.com/feed/21983844/most-recent", "enabled": true },
+    { "name": "Oxford Academic", "url": "https://academic.oup.com/rss/site_5367/3228.xml", "enabled": true },
+    { "name": "ScienceDirect 30505917", "url": "https://rss.sciencedirect.com/publication/science/30505917", "enabled": true },
+    { "name": "ScienceDirect 00928674", "url": "https://rss.sciencedirect.com/publication/science/00928674", "enabled": true },
+    { "name": "ScienceDirect 22111247", "url": "https://rss.sciencedirect.com/publication/science/22111247", "enabled": true },
+    { "name": "ScienceDirect 26663791", "url": "https://rss.sciencedirect.com/publication/science/26663791", "enabled": true },
+    { "name": "ScienceDirect 27729850", "url": "https://rss.sciencedirect.com/publication/science/27729850", "enabled": true },
+    { "name": "ACS Environmental Health", "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ehnea2", "enabled": true },
+    { "name": "ScienceDirect 01604120", "url": "https://rss.sciencedirect.com/publication/science/01604120", "enabled": true },
+    { "name": "Springer Journal 12940", "url": "https://link.springer.com/search.rss?query=&search-within=Journal&facet-journal-id=12940", "enabled": true },
+    { "name": "ACS EVH", "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=evhpaz", "enabled": true },
+    { "name": "ScienceDirect 02697491", "url": "https://rss.sciencedirect.com/publication/science/02697491", "enabled": true },
+    { "name": "ACS EST", "url": "https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=esthag", "enabled": true },
+    { "name": "ScienceDirect 10010742", "url": "https://rss.sciencedirect.com/publication/science/10010742", "enabled": true },
+    { "name": "ScienceDirect 03043894", "url": "https://rss.sciencedirect.com/publication/science/03043894", "enabled": true },
+    { "name": "Springer Journal 12974", "url": "https://link.springer.com/search.rss?query=&search-within=Journal&facet-journal-id=12974", "enabled": true },
+    { "name": "Nature", "url": "https://www.nature.com/nature.rss", "enabled": true },
+    { "name": "Nature Communications", "url": "https://www.nature.com/ncomms.rss", "enabled": true },
+    { "name": "Nature Neuroscience", "url": "https://www.nature.com/neuro.rss", "enabled": true },
+    { "name": "Nature Reviews Neuroscience", "url": "https://www.nature.com/nrn.rss", "enabled": true },
+    { "name": "Neuron", "url": "https://rss.sciencedirect.com/publication/science/08966273", "enabled": true },
+    { "name": "Science", "url": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science", "enabled": true },
+    { "name": "Science Advances", "url": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv", "enabled": true }
+  ]
+}
