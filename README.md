@@ -4,7 +4,7 @@
 
 基于 [Codex](https://github.com/openai/codex) 构建的医学文献自动化工作流：RSS + PubMed 自动抓取 → AI 分级 → Zotero 写回 → 中文标题翻译 → Excel 报表，全程无需手动翻期刊、筛标题。
 
-[English](#english) | [v1.1 更新内容](#v11-更新内容) | [快速上手](#快速上手6-步) | [配置说明](#配置文件详细说明) | [FAQ](#常见问题)
+[English](#english) | [v1.1 更新内容](#v11-更新内容) | [快速上手](#快速上手6-步) | [配置说明](#配置文件速查表) | [FAQ](#常见问题)
 
 ---
 
@@ -159,7 +159,7 @@ flowchart TD
 
 ---
 
-## 🚀 快速上手（6 步）
+## 快速上手（6 步）
 
 ### 第 1 步：下载项目
 
@@ -329,7 +329,7 @@ ZOTERO_EXE=D:/Zotero/zotero.exe
 * 排除没有实质性医学洞见的方法学论文。
 ```
 
-> 💡 **提示**：首次运行时如果 `screening_standards.md` 不存在，管线会自动创建一个默认版本。建议手动定制以适应你的研究方向。
+> 💡 **提示**：首次运行时如果 `screening_standards.md` 不存在，管线会自动创建一个默认版本。**强烈建议手动定制以适应你的研究方向**——这是影响分级质量最核心的配置文件。
 
 #### 4.4 分级规则（`config/workflow_rules.json`）
 
@@ -344,7 +344,7 @@ ZOTERO_EXE=D:/Zotero/zotero.exe
 - `weights`：各关键词维度的权重
 - `thresholds`：A/B/C/D 四级的分数阈值
 
-#### 4.5 翻译配置（`config/title_translation.config.json`）
+> 💡 **提示**：`workflow_rules.json` 直接决定分级质量，**请务必根据你的研究方向修改关键词和期刊白名单**。（`config/title_translation.config.json`）
 
 翻译 API 的参数配置，一般使用默认值即可：
 
@@ -420,7 +420,7 @@ Codex 会调用 `automation_update` 工具创建一个 cron 自动化任务，�
 
 ---
 
-## ⚙️ 配置文件速查表
+## 配置文件速查表
 
 | 文件 | 作用 | 必填 | 默认值 |
 |---|---|---|---|
@@ -472,7 +472,7 @@ zotero-med-pipeline/
 
 ---
 
-## ❓ 常见问题
+## 常见问题
 
 ### Q: 我没有翻译 API key 怎么办？
 
@@ -553,6 +553,8 @@ MIT License © 2026 Chip-G0202
 
 
 ---
+
+<a id="english"></a>
 
 # English
 
@@ -720,7 +722,7 @@ flowchart TD
 
 ---
 
-## 🚀 Quick Start (6 Steps)
+## Quick Start (6 Steps)
 
 ### Step 1: Download the Project
 
@@ -890,7 +892,7 @@ This is your core screening rules file. The pipeline uses these rules to grade l
 * Exclude methodological papers without substantial medical insights.
 ```
 
-> 💡 **Tip**: If `screening_standards.md` doesn't exist on first run, the pipeline will automatically create a default version. Manual customization is recommended to fit your research direction.
+> 💡 **Tip**: If `screening_standards.md` doesn't exist on first run, the pipeline will automatically create a default version. **Manual customization is strongly recommended** — this is the most impactful configuration file for grading quality.
 
 #### 4.4 Grading Rules (`config/workflow_rules.json`)
 
@@ -904,6 +906,8 @@ Defines the A/B/C/D four-level keyword weights and thresholds.
 **Other fields (usually no need to change):**
 - `weights`: Weight for each keyword dimension
 - `thresholds`: Score thresholds for A/B/C/D levels
+
+> 💡 **Tip**: `workflow_rules.json` directly affects grading quality. **Be sure to customize the keywords and journal whitelist for your research direction.**
 
 #### 4.5 Translation Configuration (`config/title_translation.config.json`)
 
@@ -981,7 +985,7 @@ In Codex's Automation panel:
 
 ---
 
-## ⚙️ Configuration Details
+## Configuration Details
 
 | File | Function | Required | Default |
 |---|---|---|---|
@@ -1033,7 +1037,7 @@ zotero-med-pipeline/
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 ### Q: What if I don't have a translation API key?
 
