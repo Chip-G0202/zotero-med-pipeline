@@ -51,3 +51,6 @@ config.example.json
 
 # Release notes (not part of the pipeline)
 RELEASE_NOTES_v2.0.md
+
+# Internal agent rules (not for public repo)
+PUBLISH_RULES.md
