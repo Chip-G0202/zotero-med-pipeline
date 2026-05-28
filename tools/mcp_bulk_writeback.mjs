@@ -49,6 +49,26 @@ const GRADE_COLLECTIONS = {
   [LABELS.C]: LABELS.C,
 };
 const HISTORY_COLLECTION_MODIFICATION_FORBIDDEN = false;
+const STAR_MIGRATION_DISABLED_VALUES = new Set(["disabled", "off", "0", "false", "no"]);
+const STAR_MIGRATION_LEGACY_VALUES = new Set(["legacy", "default", "safe", "ab_only", "ab-only", "ab"]);
+const STAR_MIGRATION_EXPAND_VALUES = new Set(["expand", "all_grades", "all-grades", "full", "broad"]);
+
+export function parseStarMigrationConfig(env = process.env) {
+  const rawMode = String(env.ZOTERO_STAR_MIGRATION_MODE || "").trim().toLowerCase();
+  const rawWindow = Number(env.ZOTERO_STAR_MIGRATION_WINDOW_DAYS || 7);
+  const rawThreshold = Number(env.ZOTERO_STAR_MIGRATION_MIN_STARS || 4);
+  const windowDays = Number.isFinite(rawWindow) && rawWindow > 0 ? Math.floor(rawWindow) : 7;
+  const starThreshold = Number.isFinite(rawThreshold) && rawThreshold > 0 ? Math.min(5, Math.max(1, Math.floor(rawThreshold))) : 4;
+
+  if (STAR_MIGRATION_DISABLED_VALUES.has(rawMode)) {
+    return { enabled: false, mode: rawMode || "disabled", expandAllGrades: false, windowDays, starThreshold };
+  }
+  if (STAR_MIGRATION_EXPAND_VALUES.has(rawMode)) {
+    return { enabled: true, mode: rawMode || "expand", expandAllGrades: true, windowDays: Math.max(windowDays, 14), starThreshold: Math.min(starThreshold, 2) };
+  }
+
+  return { enabled: true, mode: rawMode || "legacy", expandAllGrades: STAR_MIGRATION_LEGACY_VALUES.has(rawMode) ? false : true, windowDays, starThreshold };
+}
 
 async function mcpToolCall(name, args, id) {
   mcpCallCounters.set(name, (mcpCallCounters.get(name) || 0) + 1);
@@ -166,12 +186,13 @@ function pushIndex(map, key, itemKey) {
   if (!map.has(key)) map.set(key, itemKey);
 }
 
-async function getCollectionItemKeys(collectionKey, idBase) {
+async function getCollectionItemKeys(collectionKey, idBase, overrideMcpToolCall) {
+  const call = overrideMcpToolCall || mcpToolCall;
   const keys = [];
   let offset = 0;
   const limit = 500;
   while (true) {
-    const items = parseToolText(await mcpToolCall("get_collection_items", { collectionKey, limit, offset }, idBase + offset));
+    const items = parseToolText(await call("get_collection_items", { collectionKey, limit, offset }, idBase + offset));
     if (!Array.isArray(items) || !items.length) break;
     for (const it of items) {
       if (it?.key) keys.push(it.key);
@@ -285,31 +306,65 @@ function parseDateNameToDate(name) {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
-function inLast7Days(d, now) {
+function inLastNDays(d, now, days) {
   if (!d) return false;
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+  const n = Number(days || 7);
+  const windowDays = Number.isFinite(n) && n > 0 ? Math.floor(n) : 7;
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - windowDays);
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   return d >= start && d <= end;
 }
 
-async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall }) {
+function hasStrongStarMark(data, tags) {
+  if (parseStarLevel(tags) > 0) return true;
+  if (data?.starred === true || data?.starred === 1) return true;
+  if (data?.favorite === true || data?.favorite === 1) return true;
+  return false;
+}
+
+function isItemValidForMigration(data) {
+  const title = String(data?.title || "").trim();
+  const hasIdentifier = Boolean(
+    data?.key ||
+    data?.itemKey ||
+    data?.DOI ||
+    data?.url ||
+    data?.linkMode ||
+    title
+  );
+  return Boolean(title && hasIdentifier);
+}
+
+export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, starMigrationConfig }) {
+  const migrationConfig = starMigrationConfig || { enabled: true, mode: "legacy", expandAllGrades: false, windowDays: 7, starThreshold: 4 };
   const stats = {
-    skipped: false,
-    reason: "",
+    skipped: !migrationConfig.enabled,
+    reason: migrationConfig.enabled ? "" : "star_migration_disabled",
+    enabled: migrationConfig.enabled,
+    mode: migrationConfig.mode,
     scanned_date_collections: 0,
     scanned_candidates: 0,
-    star_threshold: 4,
+    star_threshold: migrationConfig.starThreshold,
+    window_days: migrationConfig.windowDays,
+    expand_all_grades: migrationConfig.expandAllGrades,
     eligible_items: 0,
     moved_to_worthy: 0,
     already_in_worthy: 0,
     duplicate_candidates_skipped: 0,
+    skipped_invalid: 0,
+    skipped_already_exists: 0,
     removed_from_source_collections: 0,
     removed_from_grade_collections: 0,
     removal_failures: [],
     add_failures: [],
+    errors: [],
     date_collections: [],
     worthy_collection_key: worthyKey || "",
   };
+
+  if (stats.skipped) {
+    return stats;
+  }
 
   if (!worthyKey) {
     stats.skipped = true;
@@ -318,8 +373,9 @@ async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall }) {
   }
 
   const tree = parseToolText(await mcpToolCall("get_subcollections", { collectionKey: rootKey, recursive: true }, 660000));
-  const dateNodes = (tree || []).filter((node) => inLast7Days(parseDateNameToDate(node?.name), now));
-  const worthyItems = new Set(await getCollectionItemKeys(worthyKey, 670000));
+  const dateNodes = (tree || []).filter((node) => inLastNDays(parseDateNameToDate(node?.name), now, stats.window_days));
+  const worthyItems = new Set(await getCollectionItemKeys(worthyKey, 670000, mcpToolCall));
+  const processedEligibleKeys = new Set();
 
   for (const node of dateNodes) {
     const childMap = new Map((node.subcollections || []).map((c) => [c.name, c]));
@@ -329,9 +385,12 @@ async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall }) {
     for (const collection of sourceCollections) collectionRoleByKey.set(collection.key, "source");
     for (const collection of gradeCollections) collectionRoleByKey.set(collection.key, "grade");
     const candidateItemKeys = new Set();
-    for (const gradeCollection of [childMap.get(LABELS.A), childMap.get(LABELS.B)]) {
+    const candidateGradeCollections = stats.expand_all_grades
+      ? [childMap.get(LABELS.A), childMap.get(LABELS.B), childMap.get(LABELS.C)]
+      : [childMap.get(LABELS.A), childMap.get(LABELS.B)];
+    for (const gradeCollection of candidateGradeCollections) {
       if (!gradeCollection?.key) continue;
-      const keys = await getCollectionItemKeys(gradeCollection.key, 680000 + candidateItemKeys.size);
+      const keys = await getCollectionItemKeys(gradeCollection.key, 680000 + candidateItemKeys.size, mcpToolCall);
       for (const key of keys) candidateItemKeys.add(key);
     }
 
@@ -344,26 +403,41 @@ async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall }) {
       try {
         detail = parseToolText(await mcpToolCall("get_item_details", { itemKey, mode: "preview" }, 690000 + stats.scanned_candidates));
       } catch (error) {
+        stats.errors.push({ itemKey, error: String(error?.message || error), phase: "read_item_details" });
         stats.removal_failures.push({ itemKey, error: String(error?.message || error), phase: "read_item_details" });
         continue;
       }
       const data = detail?.data || detail || {};
       const tags = Array.isArray(data.tags) ? data.tags : Array.isArray(detail?.tags) ? detail.tags : [];
-      const starLevel = parseStarLevel(tags);
-      if (starLevel < stats.star_threshold) continue;
+      if (!hasStrongStarMark(data, tags)) continue;
 
+      if (!isItemValidForMigration(data)) {
+        stats.skipped_invalid += 1;
+        continue;
+      }
+
+      if (processedEligibleKeys.has(itemKey)) {
+        stats.duplicate_candidates_skipped += 1;
+        continue;
+      }
+
+      processedEligibleKeys.add(itemKey);
       stats.eligible_items += 1;
-      if (!worthyItems.has(itemKey)) {
-        try {
-          await mcpToolCall("add_items_to_collection", { collectionKey: worthyKey, itemKeys: [itemKey] }, 700000 + stats.eligible_items);
-          worthyItems.add(itemKey);
-          stats.moved_to_worthy += 1;
-        } catch (error) {
-          stats.add_failures.push({ itemKey, error: String(error?.message || error), phase: "add_to_worthy" });
-          continue;
-        }
-      } else {
+
+      if (worthyItems.has(itemKey)) {
         stats.already_in_worthy += 1;
+        stats.skipped_already_exists += 1;
+        continue;
+      }
+
+      try {
+        await mcpToolCall("add_items_to_collection", { collectionKey: worthyKey, itemKeys: [itemKey] }, 700000 + stats.eligible_items);
+        worthyItems.add(itemKey);
+        stats.moved_to_worthy += 1;
+      } catch (error) {
+        stats.errors.push({ itemKey, error: String(error?.message || error), phase: "add_to_worthy" });
+        stats.add_failures.push({ itemKey, error: String(error?.message || error), phase: "add_to_worthy" });
+        continue;
       }
 
       const collectionsToRemove = new Set();
@@ -383,6 +457,7 @@ async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall }) {
             stats.removed_from_grade_collections += 1;
           }
         } catch (error) {
+          stats.errors.push({ itemKey, collectionKey, error: String(error?.message || error), phase: "remove_from_day_collections" });
           stats.removal_failures.push({ itemKey, collectionKey, error: String(error?.message || error), phase: "remove_from_day_collections" });
         }
       }
@@ -412,6 +487,7 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
   const inputFile = inputFileArg ? inputFileArg.split("=")[1] : null;
   const isolatedCalibration = process.env.ZOTERO_WRITEBACK_CALIBRATION_ISOLATED === "1";
   const isolatedCollectionName = process.env.ZOTERO_WRITEBACK_CALIBRATION_COLLECTION || "Concurrency Calibration Test";
+  const starMigrationConfig = parseStarMigrationConfig();
 
   const triaged = inputFile
     ? JSON.parse(await fs.readFile(inputFile, "utf8"))
@@ -828,8 +904,8 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
   const tagCleanupMs = Date.now() - tagCleanupStarted;
   const migrationStarted = Date.now();
   const migrationStats = isolatedCalibration
-    ? { skipped: true, reason: "isolated_calibration_mode" }
-    : await migrateRatedItems({ rootKey: root.key, worthyKey: worthy?.key || null, now: TODAY, mcpToolCall });
+    ? { skipped: true, reason: "isolated_calibration_mode", enabled: false, mode: "disabled", eligible_items: 0, moved_to_worthy: 0, skipped_invalid: 0, skipped_already_exists: 0, errors: [] }
+    : await migrateRatedItems({ rootKey: root.key, worthyKey: worthy?.key || null, now: TODAY, mcpToolCall, starMigrationConfig });
   const migrationMs = Date.now() - migrationStarted;
   const summary = {
     date: dateStr,
@@ -863,12 +939,25 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
       stage: "abc_writeback",
       tag_cleanup_interface: "write_tag:set",
       historical_dedup_enabled: true,
-      star_migration_window_days: 7,
+      star_migration_window_days: migrationStats.window_days || starMigrationConfig.windowDays || 7,
       calibration_isolated_mode: isolatedCalibration,
       history_collection_modification_forbidden: HISTORY_COLLECTION_MODIFICATION_FORBIDDEN,
     },
     tag_cleanup_stats: tagCleanupStats,
     migration_stats: migrationStats,
+    star_migration: {
+      enabled: Boolean(migrationStats.enabled),
+      mode: migrationStats.mode || starMigrationConfig.mode || "unknown",
+      eligible_items: Number(migrationStats.eligible_items || 0),
+      moved_to_worthy: Number(migrationStats.moved_to_worthy || 0),
+      skipped_already_exists: Number(migrationStats.skipped_already_exists || migrationStats.already_in_worthy || 0),
+      skipped_invalid: Number(migrationStats.skipped_invalid || 0),
+      errors: Array.isArray(migrationStats.errors) ? migrationStats.errors.length : 0,
+      error_samples: Array.isArray(migrationStats.errors) ? migrationStats.errors.slice(0, 5) : [],
+      window_days: Number(migrationStats.window_days || starMigrationConfig.windowDays || 7),
+      star_threshold: Number(migrationStats.star_threshold || starMigrationConfig.starThreshold || 4),
+      expand_all_grades: Boolean(migrationStats.expand_all_grades ?? starMigrationConfig.expandAllGrades ?? true),
+    },
     collection_attach_mode: attachStats.collection_attach_mode,
     collection_attach_batch_size: attachStats.collection_attach_batch_size,
     collection_attach_calls: attachStats.collection_attach_calls,

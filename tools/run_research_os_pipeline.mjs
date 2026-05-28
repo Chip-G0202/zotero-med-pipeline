@@ -910,7 +910,13 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
     mode: "mcp_required",
     root_candidates: ["文献池", "RSS文献池"],
     target_layout: `${dateStr}/${LABELS.A} + ${dateStr}/${LABELS.B} + ${dateStr}/${LABELS.C} (${LABELS.D}不写回)`,
-    star_migration: "disabled_in_this_code_revision",
+    star_migration: {
+      status: "managed_in_stage2_writeback",
+      default_mode: process.env.ZOTERO_STAR_MIGRATION_MODE || "expand",
+      default_window_days: Number(process.env.ZOTERO_STAR_MIGRATION_WINDOW_DAYS || 14) || 14,
+      default_star_threshold: Number(process.env.ZOTERO_STAR_MIGRATION_MIN_STARS || 2) || 2,
+      note: "Stage1 不再直接执行迁移；真实迁移由 Stage2 writeback summary 输出。",
+    },
     note: "Zotero information read/write/move must be executed via zotero-mcp. This script only produces ingestion+triage payload.",
   });
   report.steps.med_zotero_bridge = {
