@@ -145,7 +145,7 @@ flowchart TD
 |---|---|
 | TITLE_TRANSLATION_API_KEY | A/B/C 级文献不翻译中文标题，Excel 里只显示英文 |
 | PREFERENCE_LEARNING_API_KEY | screening_standards.docx 评价区的反馈不会被 LLM 自动处理为规则修改；Excel 反馈的规则引擎学习仍正常 |
-| config/workflow_rules.json | 使用默认分级规则（可能不适合你的研究方向） |
+| config/workflow_rules.json | 需 AI 或手动填写关键词和期刊（见第 4 步） |
 
 ### 可选微调（有默认值，一般不用改）
 
@@ -226,6 +226,20 @@ ZOTERO_EXE=D:/Zotero/zotero.exe
 
 
 ### 第 4 步：配置搜索源和筛选标准
+
+> 🤖 **AI 辅助配置**：下面的 `config/workflow_rules.json`、`screening_standards.md`、`config/pubmed_pmc_search.json` 配置较复杂，建议在 Codex 中直接让 AI 帮你生成。复制以下提示词并替换 `[你的研究方向]` 即可：
+>
+> ```
+> 请根据我的研究方向帮我配置 Zotero Med Pipeline 的配置文件。
+> 我的研究方向是：[你的研究方向，例如：环境污染物（如微塑料、PFAS）对神经系统发育的毒性机制]
+>
+> 请帮我：
+> 1. 填写 config/workflow_rules.json 中的 terms.pollutant、terms.core_topic、terms.mechanism、journal_whitelist 和 grade_reasons
+> 2. 填写 screening_standards.md 中的优先关注、相对降权和严格排除规则
+> 3. 填写 config/pubmed_pmc_search.json 中的 keyword_groups
+>
+> 不要修改 feedback_learning 部分和 weights/thresholds 的默认值。
+> ```
 
 #### 4.1 RSS 订阅源（`config/rss_sources.json`）
 
@@ -344,7 +358,9 @@ ZOTERO_EXE=D:/Zotero/zotero.exe
 - `weights`：各关键词维度的权重
 - `thresholds`：A/B/C/D 四级的分数阈值
 
-> 💡 **提示**：`workflow_rules.json` 直接决定分级质量，**请务必根据你的研究方向修改关键词和期刊白名单**。（`config/title_translation.config.json`）
+> 💡 **提示**：`workflow_rules.json` 直接决定分级质量，**请务必根据你的研究方向修改关键词和期刊白名单**。
+
+#### 4.5 翻译配置（`config/title_translation.config.json`）
 
 翻译 API 的参数配置，一般使用默认值即可：
 
@@ -428,7 +444,7 @@ Codex 会调用 `automation_update` 工具创建一个 cron 自动化任务，�
 | `config/rss_sources.json` | RSS 订阅源 | 至少配一个来源 | 空列表 |
 | `config/pubmed_pmc_search.json` | PubMed 搜索策略 | 至少配一个来源 | 空查询 |
 | `screening_standards.md` | 筛选标准 | 建议定制 | 首次运行自动创建 |
-| `config/workflow_rules.json` | 分级规则 | 建议修改关键词 | 通用默认值 |
+| `config/workflow_rules.json` | 分级规则 | 建议修改关键词 | 需 AI 或手动配置 |
 | `config/title_translation.config.json` | 翻译配置 | 可选 | 见文件内注释 |
 | `config/preference_learning.config.json` | 偏好学习配置 | 可选 | 见文件内注释 |
 
@@ -707,7 +723,7 @@ flowchart TD
 |---|---|
 | `TITLE_TRANSLATION_API_KEY` | A/B/C grade literature not translated to Chinese, Excel shows English only |
 | `PREFERENCE_LEARNING_API_KEY` | docx evaluation area feedback not automatically processed by LLM; Excel feedback rule engine learning still works |
-| `config/workflow_rules.json` | Uses default grading rules (may not fit your research direction) |
+| `config/workflow_rules.json` | Requires AI or manual keyword/journal setup (see Step 4) |
 
 ### Optional Fine-tuning (Has Defaults, Usually No Need to Change)
 
@@ -789,6 +805,20 @@ ZOTERO_EXE=D:/Zotero/zotero.exe
 
 
 ### Step 4: Configure Search Sources and Screening Standards
+
+> 🤖 **AI-Assisted Configuration**: The files below (`config/workflow_rules.json`, `screening_standards.md`, `config/pubmed_pmc_search.json`) are complex. You can ask Codex to generate them for you. Copy the prompt below and replace `[your research direction]`:
+>
+> ```
+> Please help me configure the Zotero Med Pipeline config files based on my research direction.
+> My research direction is: [your research direction, e.g., toxic mechanisms of environmental pollutants (microplastics, PFAS) on neurodevelopment]
+>
+> Please:
+> 1. Fill in config/workflow_rules.json: terms.pollutant, terms.core_topic, terms.mechanism, journal_whitelist, and grade_reasons
+> 2. Fill in screening_standards.md: priority focus, demote, and strict exclude rules
+> 3. Fill in config/pubmed_pmc_search.json: keyword_groups
+>
+> Do not modify feedback_learning or the default weights/thresholds.
+> ```
 
 #### 4.1 RSS Subscriptions (`config/rss_sources.json`)
 
@@ -993,7 +1023,7 @@ In Codex's Automation panel:
 | `config/rss_sources.json` | RSS subscriptions | At least one source | Empty list |
 | `config/pubmed_pmc_search.json` | PubMed search strategy | At least one source | Empty query |
 | `screening_standards.md` | Screening standards | Recommended customization | Auto-created on first run |
-| `config/workflow_rules.json` | Grading rules | Recommended keyword modification | Generic defaults |
+| `config/workflow_rules.json` | Grading rules | Recommended keyword modification | Requires AI or manual setup |
 | `config/title_translation.config.json` | Translation configuration | Optional | See file comments |
 | `config/preference_learning.config.json` | Preference learning configuration | Optional | See file comments |
 
