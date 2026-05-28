@@ -227,7 +227,9 @@ ZOTERO_EXE=D:/Zotero/zotero.exe
 
 ### 第 4 步：配置搜索源和筛选标准
 
-> 🤖 **AI 辅助配置**：下面的 `config/workflow_rules.json`、`screening_standards.md`、`config/pubmed_pmc_search.json` 配置较复杂，建议在 Codex 中直接让 AI 帮你生成。复制以下提示词并替换 `[你的研究方向]` 即可：
+> 🤖 **AI 辅助配置（手动配置较复杂，强烈建议AI辅助配置）**：
+> 下面的 `config/workflow_rules.json`、`screening_standards.md`、`config/pubmed_pmc_search.json` 配置较复杂，建议在 Codex 中直接让 AI 帮你生成。
+> 复制以下提示词并替换 `[你的研究方向]` 即可：
 >
 > ```
 > 请根据我的研究方向帮我配置 Zotero Med Pipeline 的配置文件。
@@ -806,7 +808,9 @@ ZOTERO_EXE=D:/Zotero/zotero.exe
 
 ### Step 4: Configure Search Sources and Screening Standards
 
-> 🤖 **AI-Assisted Configuration**: The files below (`config/workflow_rules.json`, `screening_standards.md`, `config/pubmed_pmc_search.json`) are complex. You can ask Codex to generate them for you. Copy the prompt below and replace `[your research direction]`:
+> 🤖 **AI-Assisted Configuration**:
+> The files below (`config/workflow_rules.json`, `screening_standards.md`, `config/pubmed_pmc_search.json`) are complex. You can ask Codex to generate them for you.
+> Copy the prompt below and replace `[your research direction]`:
 >
 > ```
 > Please help me configure the Zotero Med Pipeline config files based on my research direction.
