@@ -1,0 +1,6 @@
+{
+  "model": "YOUR_TRANSLATION_MODEL",
+  "temperature": 0.2,
+  "batch_size": 10,
+  "fallback_to_english": true
+}
