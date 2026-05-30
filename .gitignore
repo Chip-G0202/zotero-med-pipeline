@@ -51,6 +51,16 @@ config.example.json
 
 # Release notes (not part of the pipeline)
 RELEASE_NOTES_v2.0.md
+RELEASE_NOTES_v1.1.md
 
 # Internal agent rules (not for public repo)
 PUBLISH_RULES.md
+
+# Personal rules and temp files
+PUBLIC_RELEASE_CHECKLIST.md
+last_run_output.txt
+out.txt
+pipeline_run_log.txt
+tmp_star_debug.mjs
+tmp*.mjs
+*.tmp
