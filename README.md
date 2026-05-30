@@ -1457,3 +1457,4 @@ ZOTERO_STAR_MIGRATION_MIN_STARS=4
 - [Zotero MCP](https://github.com/your-zotero-mcp-plugin) — 提供与 Zotero 的 MCP 集成能力
 - [Codex](https://github.com/openai/codex) — AI 编程助手，本项目的代码生成工具
 - [Ollama](https://ollama.ai/) — 本地大语言模型服务，用于语义复审功能
+
