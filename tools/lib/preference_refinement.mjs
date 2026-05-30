@@ -2,19 +2,11 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
 
+// NOTE: TOPIC_PATTERNS below are examples only.
+// Users should customize these patterns for their own research direction.
 const TOPIC_PATTERNS = [
-  { tag: "sglt2", label: "SGLT2", pattern: /\bsglt-?2\b/i },
-  { tag: "glp-1", label: "GLP-1", pattern: /\bglp-?1\b/i },
-  { tag: "diabetes", label: "diabetes", pattern: /\bdiabet/i },
-  { tag: "obesity", label: "obesity", pattern: /\bobes/i },
-  { tag: "heart_failure", label: "heart failure", pattern: /heart failure|心衰/i },
-  { tag: "cardiovascular", label: "cardiovascular disease", pattern: /cardiovascular|心血管/i },
-  { tag: "ckd", label: "CKD", pattern: /\bckd\b|chronic kidney disease|慢性肾病/i },
-  { tag: "renal", label: "renal outcomes", pattern: /\brenal\b|kidney|肾/i },
-  { tag: "hypertension", label: "hypertension", pattern: /hypertension|blood pressure|高血压/i },
-  { tag: "mortality", label: "mortality", pattern: /mortality|death|死亡/i },
-  { tag: "hospitalization", label: "hospitalization", pattern: /hospitali[sz]ation|住院/i },
-  { tag: "safety", label: "safety outcomes", pattern: /safety|adverse|不良反应|安全性/i },
+  { tag: "example-topic-1", label: "Example Topic 1", pattern: /\bexample-topic-1\b/i },
+  { tag: "example-topic-2", label: "Example Topic 2", pattern: /\bexample-topic-2\b/i },
 ];
 
 const STUDY_PATTERNS = [
@@ -38,7 +30,9 @@ const EXCLUSION_PATTERNS = [
   { tag: "non_medical", label: "non-medical", pattern: /architecture|social media|digital media|虚拟建筑|社交媒体|心理学/i },
 ];
 
-const TOPIC_ORDER = ["sglt2", "glp-1", "diabetes", "obesity", "heart_failure", "cardiovascular", "ckd", "renal", "hypertension", "mortality", "hospitalization", "safety"];
+// NOTE: TOPIC_ORDER below is an example only.
+// Users should customize this for their own research direction.
+const TOPIC_ORDER = ["example-topic-1", "example-topic-2"];
 const SCOPE_ORDER = ["clinical_outcome", "human_outcome", "randomized_trial", "meta_analysis", "cohort", "guideline", "case_report", "animal_only", "animal_study", "in_vitro_only", "in_vitro", "basic_mechanism_only", "mechanistic_study", "irrelevant_disease_context", "low_evidence", "non_medical"];
 
 function nowIso(input) {
@@ -137,7 +131,7 @@ function inferEvidenceFeatures({
     ...matchTags(titleText, EXCLUSION_PATTERNS),
   ]);
   const keyTerms = uniq([...topicTags, ...studyTags, ...exclusionTags]);
-  const clinicalFocus = topicTags.some((tag) => ["heart_failure", "cardiovascular", "renal", "ckd", "mortality", "hospitalization", "safety"].includes(tag))
+  const clinicalFocus = topicTags.some((tag) => ["example-topic-1", "example-topic-2"].includes(tag))
     || studyTags.includes("human_outcome")
     || /clinical outcome|hard endpoint|临床结局|硬终点/i.test(fullText);
   const prefersClinicalOverMechanism = direction === "positive" && /人群结局|临床结局|硬终点|比机制更重要|关注.*结局/i.test(commentText);
@@ -395,7 +389,7 @@ function buildClusterSeed(evidence) {
   const scopeTags = evidence.scope_tags || [];
   const keyTerms = evidence.key_terms || [];
   const direction = evidence.direction || "ignored";
-  const clinicalPreference = topicTags.includes("heart_failure") || topicTags.includes("cardiovascular") || scopeTags.includes("clinical_outcome") || scopeTags.includes("human_outcome");
+  const clinicalPreference = topicTags.includes("example-topic-1") || topicTags.includes("example-topic-2") || scopeTags.includes("clinical_outcome") || scopeTags.includes("human_outcome");
   let clusterFamily = "needs_more_feedback";
   if (direction === "positive") clusterFamily = clinicalPreference ? "strong_positive" : "soft_positive";
   else if (direction === "negative") clusterFamily = scopeTags.some((tag) => ["animal_only", "in_vitro_only", "basic_mechanism_only", "irrelevant_disease_context", "non_medical"].includes(tag))
@@ -403,7 +397,7 @@ function buildClusterSeed(evidence) {
     : "exclusion_hint";
   else if (direction === "ambiguous") clusterFamily = "ambiguous";
 
-  const positiveTopics = sortByOrder(uniq(topicTags.filter((tag) => ["sglt2", "glp-1", "diabetes", "obesity", "heart_failure", "cardiovascular", "ckd", "renal", "hypertension"].includes(tag))), TOPIC_ORDER);
+  const positiveTopics = sortByOrder(uniq(topicTags.filter((tag) => ["example-topic-1", "example-topic-2"].includes(tag))), TOPIC_ORDER);
   const groupedNegativeScopeTags = uniq([
     (scopeTags.includes("animal_only") || scopeTags.includes("animal_study")) ? "animal_only" : null,
     (scopeTags.includes("in_vitro_only") || scopeTags.includes("in_vitro")) ? "in_vitro_only" : null,

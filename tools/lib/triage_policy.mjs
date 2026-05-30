@@ -21,12 +21,10 @@ export const SOURCE_LABELS = {
   other: TRIAGE_RULES.source_labels?.other || "other",
 };
 
-const POLLUTANT_TERMS = TRIAGE_RULES.terms?.pollutant || ["pollution", "pollutant", "microplastic", "pm2.5", "pfas", "exposure", "toxic"];
-const CORE_TOPIC_TERMS = TRIAGE_RULES.terms?.core_topic || ["microglia", "neuroinflamm", "brain", "cognitive", "mitochond", "synap", "neurotox"];
-const MECHANISM_TERMS = TRIAGE_RULES.terms?.mechanism || ["pathway", "mechanism", "axis", "oxidative", "omics", "signaling", "model"];
-const JOURNAL_WHITELIST = new Set(TRIAGE_RULES.journal_whitelist || [
-  "nature", "nature neuroscience", "nature reviews neuroscience", "science", "science advances", "cell", "cell reports", "neuron", "environmental health perspectives", "environmental science & technology", "environment international", "environmental pollution", "journal of neuroinflammation",
-]);
+const POLLUTANT_TERMS = TRIAGE_RULES.terms?.pollutant || ["example-pollutant-1", "example-pollutant-2"];
+const CORE_TOPIC_TERMS = TRIAGE_RULES.terms?.core_topic || ["example-topic-1", "example-topic-2"];
+const MECHANISM_TERMS = TRIAGE_RULES.terms?.mechanism || ["example-mechanism-1", "example-mechanism-2"];
+const JOURNAL_WHITELIST = new Set(TRIAGE_RULES.journal_whitelist || ["example-journal-1", "example-journal-2"]);
 const WEIGHTS = {
   pollutant: Number(TRIAGE_RULES.weights?.pollutant ?? 1.6),
   core_topic: Number(TRIAGE_RULES.weights?.core_topic ?? 1.5),
@@ -118,45 +116,35 @@ export function parseScreeningStandards(markdown) {
   }
   sections.topic_definition = preambleLines.join(" ").trim();
 
+  // NOTE: The following keyword expansion rules are examples only.
+  // Users should customize these for their own research direction.
+  // The default screening_standards.md uses generic placeholders.
   const hardExcludes = [];
   for (const rule of sections.hard_excludes) {
     const lower = rule.toLowerCase();
     const keywords = [];
-    if (lower.includes("癌症") || lower.includes("肿瘤") || lower.includes("cancer") || lower.includes("tumo")) keywords.push("cancer", "tumor", "tumour", "carcinoma", "neoplas", "malignan", "癌症", "肿瘤", "癌");
-    if (lower.includes("病毒") || lower.includes("virus") || lower.includes("viral")) keywords.push("virus", "viral", "virome", "病毒");
-    if (lower.includes("植物") || lower.includes("plant") || lower.includes("arabidopsis")) keywords.push("plant", "arabidopsis", "植物", "botanical");
-    if (lower.includes("水生") || lower.includes("鱼类") || lower.includes("两栖") || lower.includes("aquatic") || lower.includes("fish") || lower.includes("amphibian") || lower.includes("zebrafish")) keywords.push("aquatic", "fish", "amphibian", "zebrafish", "水生", "鱼类", "两栖", "斑马鱼");
-    if (lower.includes("虫类") || lower.includes("昆虫") || lower.includes("线虫") || lower.includes("节肢") || lower.includes("insect") || lower.includes("nematode") || lower.includes("drosophila") || lower.includes("arthropod")) keywords.push("insect", "nematode", "drosophila", "arthropod", "昆虫", "线虫", "果蝇", "节肢");
-    if (lower.includes("环境科学") || lower.includes("生态毒理") || lower.includes("环境工程") || lower.includes("污染物降解") || lower.includes("环境化学") || lower.includes("environmental") || lower.includes("ecotoxicolog")) keywords.push("environmental", "ecotoxicology", "环境科学", "生态毒理", "环境工程", "污染物降解");
-    if (lower.includes("工程") || lower.includes("材料科学") || lower.includes("物理") || lower.includes("电子") || lower.includes("机械") || lower.includes("computational engineer") || lower.includes("engineering")) keywords.push("engineering", "computational", "material science", "physics", "工程", "材料科学");
-    if (lower.includes("方法学") || lower.includes("算法") || lower.includes("工具开发") || lower.includes("ai ") || lower.includes("artificial intelligence") || lower.includes("machine learning") || lower.includes("deep learning")) keywords.push("methodological", "algorithm", "tool development", "artificial intelligence", "machine learning", "deep learning", "方法学", "算法", "工具开发");
+    // Generic category expansions - customize for your research
+    if (lower.includes("example-exclude-category")) keywords.push("example-exclude-term");
     if (keywords.length === 0) keywords.push(lower.slice(0, 60));
     hardExcludes.push({ rule, keywords, section: "严格排除" });
   }
 
+  // Generic negative preference expansions - customize for your research
   const negativePrefs = [];
   for (const rule of sections.negative_preferences) {
     const lower = rule.toLowerCase();
     const keywords = [];
-    if (lower.includes("人群队列") || lower.includes("流行病") || lower.includes("cohort") || lower.includes("epidemiolog")) keywords.push("cohort", "epidemiology", "人群队列", "流行病学");
-    if (lower.includes("肾脏") || lower.includes("renal") || lower.includes("kidney")) keywords.push("renal", "kidney", "肾脏", "肾病");
-    if (lower.includes("果蝇") || lower.includes("线虫") || lower.includes("酵母") || lower.includes("drosophila") || lower.includes("yeast")) keywords.push("drosophila", "yeast", "nematode", "果蝇", "线虫", "酵母");
-    if (lower.includes("纯描述") || lower.includes("descriptive")) keywords.push("descriptive", "描述性");
-    if (lower.includes("非医学") || lower.includes("无关疾病")) keywords.push("non-medical", "非医学", "无关疾病");
+    if (lower.includes("example-negative-category")) keywords.push("example-negative-term");
     if (keywords.length === 0) keywords.push(lower.slice(0, 50));
     negativePrefs.push({ rule, keywords, section: "相对降权" });
   }
 
+  // Generic positive preference expansions - customize for your research
   const positivePrefs = [];
   for (const rule of sections.positive_preferences) {
     const lower = rule.toLowerCase();
     const keywords = [];
-    if (lower.includes("动物实验") || lower.includes("哺乳动物") || lower.includes("小鼠") || lower.includes("大鼠") || lower.includes("mouse") || lower.includes("rat")) keywords.push("animal", "mouse", "mice", "rat", "mammal", "动物实验", "小鼠", "大鼠");
-    if (lower.includes("神经") || lower.includes("小胶质") || lower.includes("突触") || lower.includes("neuro") || lower.includes("microglia") || lower.includes("synap")) keywords.push("neuro", "microglia", "synapse", "brain", "神经", "小胶质", "突触");
-    if (lower.includes("组学") || lower.includes("转录组") || lower.includes("蛋白组") || lower.includes("代谢组") || lower.includes("omics") || lower.includes("transcriptom") || lower.includes("proteom") || lower.includes("metabolom")) keywords.push("omics", "transcriptomics", "proteomics", "metabolomics", "组学");
-    if (lower.includes("补体") || lower.includes("complement")) keywords.push("complement", "补体");
-    if (lower.includes("肠道") || lower.includes("菌群") || lower.includes("微生物") || lower.includes("microbio") || lower.includes("gut")) keywords.push("microbiome", "gut", "microbiota", "肠道", "菌群", "微生物");
-    if (lower.includes("斑马鱼") || lower.includes("zebrafish")) keywords.push("zebrafish", "斑马鱼");
+    if (lower.includes("example-positive-category")) keywords.push("example-positive-term");
     if (keywords.length === 0) keywords.push(lower.slice(0, 50));
     positivePrefs.push({ rule, keywords, section: "优先关注" });
   }
@@ -319,5 +307,194 @@ export function summarizeGradeCounts(items = []) {
     uncertain_count,
     writeback_candidate_count: grade_counts.A + grade_counts.B + grade_counts.C,
     skipped_d_count: grade_counts.D,
+  };
+}
+
+// ─── Semantic Grading ─────────────────────────────────────────────────
+
+const GRADE_NUMERIC = { A: 1, B: 2, C: 3, D: 4 };
+const NUMERIC_TO_GRADE = { 1: "A", 2: "B", 3: "C", 4: "D" };
+
+export function normalizeGradeLetter(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (/^[ABCD]$/.test(raw)) return raw;
+  const m = raw.match(/^[ABCD]/);
+  return m ? m[0] : "";
+}
+
+/**
+ * Build a lookup index from feedback signals for semantic grade matching.
+ * Indexed by multiple keys (when present): itemKey, DOI, normTitle of english_title,
+ * normTitle of title_translation.
+ */
+export function buildFeedbackIndex(signals = []) {
+  const index = new Map();
+  for (const sig of signals) {
+    const feedback = String(sig.feedback || "").trim().toLowerCase();
+    let direction = "ignored";
+    if (feedback === "keep" || feedback === "upgrade") direction = "positive";
+    else if (feedback === "drop" || feedback === "downgrade") direction = "negative";
+    if (direction === "ignored") continue;
+    const entry = {
+      direction,
+      title: sig.english_title || "",
+      title_translation: sig.title_translation || sig.titleContext || "",
+    };
+    const itemKey = String(sig.itemKey || sig.item_key || "").trim();
+    if (itemKey) index.set(`key:${itemKey}`, entry);
+    const doi = normalizeIdentifier(sig.doi || sig.DOI);
+    if (doi) index.set(`doi:${doi}`, entry);
+    const enKey = normTitle(sig.english_title || "");
+    if (enKey) index.set(`title:${enKey}`, entry);
+    const zhKey = normTitle(sig.title_translation || "");
+    if (zhKey && zhKey !== enKey) index.set(`title:${zhKey}`, entry);
+  }
+  return index;
+}
+
+/**
+ * Derive semantic grade from semantic search results matched against feedback index.
+ * Returns { semanticGrade, semanticReason, matchedFeedbackCount, skippedReason }
+ *
+ * Matches search results against feedback index using itemKey, DOI, then title.
+ * Only matched results influence the grade; unmatched results are ignored.
+ */
+export function deriveSemanticGradeFromFeedbackMatches({
+  searchResults = [],
+  feedbackIndex = new Map(),
+  ruleGrade = "",
+} = {}) {
+  const ruleNum = GRADE_NUMERIC[ruleGrade];
+  if (!ruleNum) {
+    return { semanticGrade: "", semanticReason: "", matchedFeedbackCount: 0, skippedReason: "invalid_rule_grade" };
+  }
+  if (!feedbackIndex.size) {
+    return { semanticGrade: "", semanticReason: "", matchedFeedbackCount: 0, skippedReason: "no_feedback_index" };
+  }
+
+  const matchedEntries = [];
+  const seenKeys = new Set();
+
+  for (const result of searchResults) {
+    const score = Number(result.score || 0);
+    let matchedEntry = null;
+
+    // Priority 1: match by itemKey
+    const rItemKey = String(result.item_key || result.itemKey || "").trim();
+    if (rItemKey) {
+      matchedEntry = feedbackIndex.get(`key:${rItemKey}`);
+    }
+    // Priority 2: match by DOI
+    if (!matchedEntry) {
+      const rDoi = normalizeIdentifier(result.doi || result.DOI);
+      if (rDoi) {
+        matchedEntry = feedbackIndex.get(`doi:${rDoi}`);
+      }
+    }
+    // Priority 3: match by normalized title
+    if (!matchedEntry) {
+      const rTitle = normTitle(result.title || "");
+      if (rTitle) {
+        matchedEntry = feedbackIndex.get(`title:${rTitle}`);
+      }
+    }
+
+    if (!matchedEntry) continue;
+
+    // Deduplicate: same feedback entry should not count twice
+    const dedupeKey = `${matchedEntry.direction}:${matchedEntry.title}`;
+    if (seenKeys.has(dedupeKey)) continue;
+    seenKeys.add(dedupeKey);
+
+    matchedEntries.push({
+      direction: matchedEntry.direction,
+      score,
+      title: result.title || "",
+    });
+  }
+
+  if (matchedEntries.length === 0) {
+    return { semanticGrade: "", semanticReason: "", matchedFeedbackCount: 0, skippedReason: "no_feedback_match" };
+  }
+
+  let adjustment = 0;
+  const reasons = [];
+  for (const entry of matchedEntries) {
+    const weight = entry.score >= 0.5 ? 1 : 0.5;
+    if (entry.direction === "positive") {
+      adjustment -= weight; // toward A (lower number)
+      reasons.push(`+${entry.title.slice(0, 60)}`);
+    } else if (entry.direction === "negative") {
+      adjustment += weight; // toward D (higher number)
+      reasons.push(`-${entry.title.slice(0, 60)}`);
+    }
+  }
+
+  const roundedAdj = Math.round(adjustment);
+  if (roundedAdj === 0) {
+    return {
+      semanticGrade: "",
+      semanticReason: `混合反馈(${matchedEntries.length}条匹配)，不调整`,
+      matchedFeedbackCount: matchedEntries.length,
+      skippedReason: "neutral_feedback",
+    };
+  }
+
+  const newNum = Math.max(1, Math.min(4, ruleNum + roundedAdj));
+  const semanticGrade = NUMERIC_TO_GRADE[newNum];
+  const direction = roundedAdj > 0 ? "下调" : "上调";
+  const semanticReason = `语义复审${direction}(${matchedEntries.length}条反馈匹配): ${reasons.slice(0, 3).join("; ")}`;
+
+  return { semanticGrade, semanticReason, matchedFeedbackCount: matchedEntries.length, skippedReason: "" };
+}
+
+/**
+ * Synthesize final grade from rule grade and optional semantic grade.
+ * Returns { finalGrade, needsHumanReview, disagreementType }
+ *
+ * Strategy:
+ * - Default: finalGrade = ruleGrade
+ * - If semanticGrade differs by 1 level: adopt semanticGrade
+ * - If semanticGrade differs by 2+ levels: keep ruleGrade, flag needs_human_review
+ */
+export function synthesizeFinalGrade({ ruleGrade, semanticGrade, semanticReason = "", flags = {} } = {}) {
+  const ruleNorm = normalizeGradeLetter(ruleGrade);
+  const semanticNorm = normalizeGradeLetter(semanticGrade);
+
+  if (!ruleNorm) {
+    return { finalGrade: ruleNorm, needsHumanReview: false, disagreementType: "" };
+  }
+  if (!semanticNorm) {
+    return { finalGrade: ruleNorm, needsHumanReview: false, disagreementType: "" };
+  }
+  if (ruleNorm === semanticNorm) {
+    return { finalGrade: ruleNorm, needsHumanReview: false, disagreementType: "" };
+  }
+
+  const ruleNum = GRADE_NUMERIC[ruleNorm];
+  const semanticNum = GRADE_NUMERIC[semanticNorm];
+  const diff = Math.abs(semanticNum - ruleNum);
+
+  if (diff >= 2) {
+    return {
+      finalGrade: ruleNorm,
+      needsHumanReview: true,
+      disagreementType: `semantic_${diff >= 3 ? "extreme" : "major"}_divergence`,
+    };
+  }
+
+  // diff === 1: adopt semantic grade, except C→D which requires human review
+  const direction = semanticNum < ruleNum ? "upgrade" : "downgrade";
+  if (ruleNorm === "C" && semanticNorm === "D") {
+    return {
+      finalGrade: ruleNorm,
+      needsHumanReview: true,
+      disagreementType: "semantic_downgrade_review",
+    };
+  }
+  return {
+    finalGrade: semanticNorm,
+    needsHumanReview: false,
+    disagreementType: `semantic_${direction}`,
   };
 }

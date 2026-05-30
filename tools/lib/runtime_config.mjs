@@ -34,7 +34,17 @@ function defaultProjectRoot() {
   return normalizePath(path.resolve(here, "../.."));
 }
 
-export function buildRuntimeConfig({ cwd = process.cwd(), env = process.env, now = new Date() } = {}) {
+function defaultZoteroExe() {
+  if (process.platform === "darwin") return "/Applications/Zotero.app/Contents/MacOS/zotero";
+  if (process.platform === "win32") return "D:/Zotero/zotero.exe";
+  return "zotero";
+}
+
+export function buildRuntimeConfig({ cwd = process.cwd(), env = process.env, now } = {}) {
+  if (!now) {
+    const overrideDate = String(env.RESEARCH_OS_OVERRIDE_DATE || "").trim();
+    now = overrideDate ? new Date(overrideDate) : new Date();
+  }
   const repoRoot = defaultProjectRoot();
   const projectRoot = normalizePath(env.ZOTERO_PROJECT_ROOT || cwd || repoRoot);
   const researchRoot = resolveUnderRoot(projectRoot, env.RESEARCH_OS_ROOT, "research_os");
@@ -47,6 +57,7 @@ export function buildRuntimeConfig({ cwd = process.cwd(), env = process.env, now
   const toolsDir = normalizePath(path.join(repoRoot, "tools"));
 
   return {
+    platform: process.platform,
     now,
     repoRoot,
     projectRoot,
@@ -57,8 +68,9 @@ export function buildRuntimeConfig({ cwd = process.cwd(), env = process.env, now
     week,
     day,
     pipelineDir,
-    zoteroExe: env.ZOTERO_EXE || "D:/Zotero/zotero.exe",
+    zoteroExe: env.ZOTERO_EXE || defaultZoteroExe(),
     mcpUrl: env.ZOTERO_MCP_URL || env.MCP_URL || "http://127.0.0.1:23120/mcp",
+    ollamaUrl: env.OLLAMA_HOST || "http://127.0.0.1:11434",
     externalLauncher: String(env.ZOTERO_EXTERNAL_LAUNCHER || "").trim().toLowerCase(),
     pwshPath: toPosix(env.PWSH_PATH || "pwsh"),
     scripts: {

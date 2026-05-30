@@ -34,13 +34,46 @@ function normalizePmcid(value) {
 function normalizeTitle(value) {
   return cleanText(value)
     .normalize("NFKC")
-    .replace(/[\u2010-\u2015]/g, "-")
-    .replace(/[“”]/g, "\"")
-    .replace(/[‘’]/g, "'")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/[\u2010-\u2015\u2212\uff0d]/g, "-")
+    .replace(/[\u2018\u2019\u201A\u201B\u02BC\u2032\uff07]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\uff02]/g, '"')
+    .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ")
+    .replace(/[\uFE30\uFE31\uFE32\uFE33\uFE34\uFE58\uFE63\uff0d]/g, "-")
+    .replace(/\.{3}/g, " ")
+    .replace(/…/g, " ")
+    .replace(/~/g, " ")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/[\uff10-\uff19]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 48))
+    .replace(/[\uff21-\uff3a]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFF21 + 97))
+    .replace(/[\uff41-\uff5a]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFF41 + 97))
+    .replace(/[\u00bc-\u00be]/g, (ch) => ({ "\u00bc": "1/4", "\u00bd": "1/2", "\u00be": "3/4" }[ch] || ch))
+    .replace(/[\u2150-\u215f]/g, (ch) => ({
+      "\u2150": "1/7", "\u2151": "1/9", "\u2152": "1/10", "\u2153": "1/3", "\u2154": "2/3", "\u2155": "1/5", "\u2156": "2/5", "\u2157": "3/5", "\u2158": "4/5", "\u2159": "1/6", "\u215a": "5/6", "\u215b": "1/8", "\u215c": "3/8", "\u215d": "5/8", "\u215e": "7/8", "\u215f": "1"
+    }[ch] || ch))
+    .replace(/[\u2460-\u2473\u2474-\u2487\u2488-\u249b\u3251-\u325f\u3260-\u327e\u3280-\u32bf\u32d0-\u32fe]/g, (ch) => {
+      const code = ch.charCodeAt(0);
+      if (code >= 0x2460 && code <= 0x2473) return String(code - 0x2460 + 1);
+      if (code >= 0x2474 && code <= 0x2487) return String(code - 0x2474 + 1);
+      if (code >= 0x2488 && code <= 0x249b) return String(code - 0x2488 + 1);
+      if (code >= 0x3251 && code <= 0x325f) return String(code - 0x3251 + 21);
+      if (code >= 0x3260 && code <= 0x327e) return String(code - 0x3260 + 1);
+      if (code >= 0x3280 && code <= 0x32bf) return String(code - 0x3280 + 1);
+      if (code >= 0x32d0 && code <= 0x32fe) return String(code - 0x32d0 + 1);
+      return " ";
+    })
+    .replace(/[\u2460-\u2473\u2474-\u2487\u2488-\u249b\u3251-\u325f\u3260-\u327e\u3280-\u32bf\u32d0-\u32fe]/g, " ")
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060\ufeff]/g, "")
     .replace(/[^a-z0-9\u4e00-\u9fff]+/g, " ")
     .trim();
 }
+
 
 function normalizeLevel(value) {
   const text = cleanText(value);

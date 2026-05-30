@@ -164,7 +164,7 @@ export function loadPubMedPmcSearchConfig({ root, now = new Date() } = {}) {
     retmax: 300,
     sort: "date",
     datetype: "pdat",
-    query: "(microplastic OR PFAS OR PM2.5 OR pollutant OR exposure) AND (neurotoxicity OR microglia OR neuroinflammation OR brain)",
+    query: "(example-topic-1 OR example-topic-2) AND (example-mechanism-1 OR example-mechanism-2)",
   };
   const { config, path: resolvedPath, warnings } = readJsonConfig(filePath, fallback);
   const daysBack = safePositiveInteger(config.days_back, 7, warnings, "days_back");
@@ -215,11 +215,11 @@ export function loadWorkflowRules({ root } = {}) {
       labels: { A: "A课题相关", B: "B专题相关", C: "C领域相关", D: "D无关" },
       source_labels: { rss: "RSS", pubmed: "PubMed", pmc: "PMC", other: "other" },
       terms: {
-        pollutant: ["pollution", "pollutant", "microplastic", "pm2.5", "pfas", "exposure", "toxic"],
-        core_topic: ["microglia", "neuroinflamm", "brain", "cognitive", "mitochond", "synap", "neurotox"],
-        mechanism: ["pathway", "mechanism", "axis", "oxidative", "omics", "signaling", "model"],
+        pollutant: ["example-pollutant-1", "example-pollutant-2"],
+        core_topic: ["example-topic-1", "example-topic-2"],
+        mechanism: ["example-mechanism-1", "example-mechanism-2"],
       },
-      journal_whitelist: ["nature", "nature neuroscience", "nature reviews neuroscience", "science", "science advances", "cell", "cell reports", "neuron", "environmental health perspectives", "environmental science & technology", "environment international", "environmental pollution", "journal of neuroinflammation"],
+      journal_whitelist: ["example-journal-1", "example-journal-2"],
       weights: { pollutant: 1.6, core_topic: 1.5, mechanism: 0.7, journal_quality: 1.2, feedback_positive: 0.6, feedback_negative: -1.0 },
       thresholds: { A_score: 6.0, A_min_pollutant_hits: 2, A_min_core_hits: 2, B_score: 3.4, C_score: 1.4, B_uncertain_below: 4.2, C_uncertain_below: 2.3 },
       grade_reasons: { A: "直接命中当前课题关键词组合，与核心课题问题高度贴合。", B: "与当前专题或邻近专题明显相关，可作为专题背景或方法参考。", C: "与所在研究领域相关，但距离当前课题和专题较远，低优先级保留。", D: "与当前课题、专题和领域相关性不足，仅保留审计记录。" },

@@ -182,8 +182,8 @@ function resolveTranslationConfig({ env = process.env } = {}) {
 export function getTranslationApiLimits() {
   const runtime = resolveTranslationConfig({ env });
   return {
-    api_rpm_limit: runtime.rateLimit.rpm,
-    api_tpm_limit: runtime.rateLimit.tpm,
+    api_rpm_limit: (runtime.rateLimit || runtime.rate_limit || {}).rpm ?? null,
+    api_tpm_limit: (runtime.rateLimit || runtime.rate_limit || {}).tpm ?? null,
     rpm_window_seconds: 60,
     tpm_window_seconds: 60,
   };
@@ -394,7 +394,7 @@ function buildTranslationRequestBody(runtime, prompt, { maxOutputTokens, stream 
     ],
   };
   if (!stream) {
-    body.max_output_tokens = Number(maxOutputTokens) || estimateMaxOutputTokens(1);
+    body.max_tokens = Number(maxOutputTokens) || estimateMaxOutputTokens(1);
   }
   return body;
 }
@@ -454,6 +454,7 @@ async function translateWithRuntime(title, {
   }
 
   const prompt = renderTranslationPrompt(runtime.promptTemplate, q);
+  const rateLimit = runtime.rateLimit || runtime.rate_limit || { rpm: 100, tpm: 10_000_000 };
   const requestLog = rateState?.requestLog || [];
   const tokenLog = rateState?.tokenLog || [];
   const maxRetries = Math.max(0, Number(runtime.max_retries || 0));
@@ -470,10 +471,10 @@ async function translateWithRuntime(title, {
       const reqCount = requestLog.length;
       const tokUsed = tokenLog.reduce((sum, item) => sum + item.tokens, 0);
       let waitMs = 0;
-      if (reqCount >= runtime.rateLimit.rpm && requestLog.length) {
+      if (reqCount >= rateLimit.rpm && requestLog.length) {
         waitMs = Math.max(waitMs, (requestLog[0] + 60_000) - nowMs + 5);
       }
-      if (tokUsed + estimatedTokens > runtime.rateLimit.tpm && tokenLog.length) {
+      if (tokUsed + estimatedTokens > rateLimit.tpm && tokenLog.length) {
         waitMs = Math.max(waitMs, (tokenLog[0].ts + 60_000) - nowMs + 5);
       }
       if (waitMs > 0) {
@@ -532,8 +533,8 @@ export async function callMimoTranslateBatch(batchItems, {
     rate_limit_wait_count: 0,
     rate_limit_wait_ms: 0,
     rate_limit_error_count: 0,
-    api_rpm_limit: runtime.rateLimit.rpm,
-    api_tpm_limit: runtime.rateLimit.tpm,
+    api_rpm_limit: (runtime.rateLimit || runtime.rate_limit || {}).rpm ?? null,
+    api_tpm_limit: (runtime.rateLimit || runtime.rate_limit || {}).tpm ?? null,
     rpm_window_seconds: 60,
     tpm_window_seconds: 60,
     estimated_tokens: 0,
@@ -601,8 +602,8 @@ export async function translateTitlesBatch(titles, concurrency = 8, {
     rate_limit_wait_count: 0,
     rate_limit_wait_ms: 0,
     rate_limit_error_count: 0,
-    api_rpm_limit: runtime.rateLimit.rpm,
-    api_tpm_limit: runtime.rateLimit.tpm,
+    api_rpm_limit: (runtime.rateLimit || runtime.rate_limit || {}).rpm ?? null,
+    api_tpm_limit: (runtime.rateLimit || runtime.rate_limit || {}).tpm ?? null,
     rpm_window_seconds: 60,
     tpm_window_seconds: 60,
   };

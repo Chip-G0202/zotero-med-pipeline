@@ -5,11 +5,13 @@ import { pathToFileURL } from "node:url";
 import { buildSkillAlignmentMatrix } from "./lib/research_os_exports.mjs";
 import { buildWritebackReadyItems } from "./lib/pipeline_stage_support.mjs";
 import { getTranslationConfig, loadTranslationCache } from "./lib/title_translation_support.mjs";
-import { LABELS, TRIAGE_VERSION, classifyItem, loadScreeningStandards, summarizeGradeCounts } from "./lib/triage_policy.mjs";
+import { LABELS, TRIAGE_VERSION, classifyItem, loadScreeningStandards, summarizeGradeCounts, buildFeedbackIndex, deriveSemanticGradeFromFeedbackMatches, synthesizeFinalGrade } from "./lib/triage_policy.mjs";
 import { createZoteroSemanticAdapter } from "./lib/zotero_semantic_search.mjs";
+import { ensureZoteroMcpReady } from "./lib/ensure_zotero_mcp_ready.mjs";
+import { ensureOllamaReady } from "./lib/ensure_ollama_ready.mjs";
 import { buildFeedbackSemanticSamples, buildPreferenceLearningAudit, refinePreferencesFromSemantic } from "./lib/preference_refinement.mjs";
 import { runFeedbackLearningDiagnostic } from "./lib/feedback_learning_support.mjs";
-import { applyScreeningStandardsLearningUpdate, generateRuleSuggestionsFromFeedback, loadRuleSuggestionsLog, ruleSuggestionsLogPath, processManualStandardEvaluation, parseScreeningStandardsDocx, screeningStandardsDocxPath, readScreeningStandardsFile } from "./lib/screening_standards_file.mjs";
+import { applyScreeningStandardsLearningUpdate, generateRuleSuggestionsFromFeedback, loadRuleSuggestionsLog, writeRuleSuggestionsLog, ruleSuggestionsLogPath, processManualStandardEvaluation, parseScreeningStandardsDocx, screeningStandardsDocxPath, readScreeningStandardsFile, syncScreeningStandardsDocx } from "./lib/screening_standards_file.mjs";
 import { evaluateRunInterval } from "./lib/schedule_support.mjs";
 import { evaluatePwshGate } from "./lib/pwsh_gate.mjs";
 import { buildRuntimeConfig } from "./lib/runtime_config.mjs";
@@ -22,7 +24,6 @@ const ROOT = RUNTIME.projectRoot;
 const RESEARCH_ROOT = RUNTIME.researchRoot;
 const REVIEW_ROOT = RUNTIME.reviewRoot;
 const ZOTERO_EXE = RUNTIME.zoteroExe;
-const CONNECTOR_PING = "http://127.0.0.1:23119/connector/ping";
 const PW_SH = RUNTIME.pwshPath;
 const DESKTOP_REVIEW_ROOT = RUNTIME.legacyDesktopReviewRoot;
 const LEGACY_PROJECT_REVIEW_ROOT = path.join(ROOT, "文献评价");
@@ -107,9 +108,6 @@ function checkPwshVersionGate() {
     commandStatus: Number(p.status ?? 1),
   });
 }
-function startZotero() {
-  spawnSync(PW_SH, ["-NoLogo", "-Command", `Start-Process "${ZOTERO_EXE}" -WindowStyle Hidden`], { encoding: "utf8" });
-}
 async function fetchText(url, timeoutMs = 15000) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -136,14 +134,6 @@ async function fetchTextWithRetry(url, attempts = 3, timeoutMs = 15000) {
     }
   }
   throw lastErr || new Error("UNKNOWN_FETCH_ERROR");
-}
-async function pingConnector() {
-  try {
-    const txt = await fetchText(CONNECTOR_PING, 5000);
-    return txt.toLowerCase().includes("running");
-  } catch {
-    return false;
-  }
 }
 function parseRssItems(xml, sourceUrl) {
   const items = [];
@@ -248,7 +238,7 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
   const totalStarted = Date.now();
   const exportLimitArg = argv.find((x) => x.startsWith("--export-limit="));
   const exportLimit = exportLimitArg ? Number(exportLimitArg.split("=")[1]) : null;
-  const now = new Date();
+  const now = RUNTIME.now;
   const dateStr = fmtDate(now);
   const week = isoWeek(now);
   const day = yyMd(now);
@@ -261,7 +251,7 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
   let lastSuccessfulRunAt = null;
   try {
     const runtimeState = JSON.parse(await fs.readFile(RUNTIME_STATE_PATH, "utf8"));
-    lastSuccessfulRunAt = runtimeState?.last_successful_full_run_at || null;
+    lastSuccessfulRunAt = runtimeState?.last_accepted_planned_slot_at || runtimeState?.last_successful_full_run_at || null;
   } catch {}
   const intervalInfo = evaluateRunInterval({
     now,
@@ -614,13 +604,23 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
       pwsh_version_unknown: report.steps.pwsh_gate.pwsh_version_unknown,
     });
   }
-  if (shouldSkipLocalZoteroLaunch(RUNTIME.externalLauncher)) {
-    console.log("external launcher mode: skip local Zotero GUI launch");
-  } else {
-    startZotero();
-    await new Promise((r) => setTimeout(r, 3000));
+  const mcpUrl = RUNTIME.mcpUrl;
+  const connectorMcpProbe = async () => {
+    const res = await fetch(mcpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_collections", arguments: {} } }),
+      signal: AbortSignal.timeout(5000),
+    });
+    const json = await res.json();
+    if (json.error) throw new Error(`MCP get_collections failed: ${JSON.stringify(json.error)}`);
+    if (!json.result) throw new Error("MCP get_collections returned no result");
+  };
+  try {
+    report.steps.connector = await ensureZoteroMcpReady({ mcpProbe: connectorMcpProbe });
+  } catch (err) {
+    report.steps.connector = { ok: false, error: String(err?.message || err), errorCode: err?.code };
   }
-  report.steps.connector = { ok: await pingConnector() };
 
   const fetchStarted = Date.now();
   const rss = await fetchRssAll();
@@ -684,6 +684,201 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
       评分明细: scored,
     };
   });
+
+  // ─── Semantic Grading Pass ──────────────────────────────────────────
+  const semanticGradingReport = {
+    enabled: false,
+    items_reviewed: 0,
+    items_skipped_not_eligible: 0,
+    items_with_semantic_grade: 0,
+    items_with_feedback_match: 0,
+    items_needing_human_review: 0,
+    final_grade_unchanged: 0,
+    final_grade_upgraded: 0,
+    final_grade_downgraded: 0,
+    unique_query_count: 0,
+    items_deduped: 0,
+    query_mode: "title_only",
+    concurrency: 0,
+    search_total_ms: 0,
+    search_avg_ms: 0,
+    skipped_reason: "",
+    error: "",
+  };
+
+  // ─── Ollama Readiness Check (before semantic grading) ────────────────
+  report.steps.ollama = { ok: false, skipped: true };
+  if (semanticAdapter.enabled) {
+    try {
+      report.steps.ollama = await ensureOllamaReady();
+    } catch (err) {
+      report.steps.ollama = { ok: false, error: String(err?.message || err), errorCode: err?.code };
+    }
+    if (!report.steps.ollama?.ok) {
+      semanticGradingReport.skipped_reason = "ollama_unavailable";
+    }
+  }
+
+  if (semanticAdapter.enabled && report.steps.ollama?.ok) {
+    const feedbackSignals = report.steps.feedback_learning?.signals || [];
+    const feedbackIdx = buildFeedbackIndex(feedbackSignals);
+    semanticGradingReport.enabled = true;
+
+    if (!feedbackIdx.size) {
+      semanticGradingReport.skipped_reason = "no_feedback_signals";
+    } else {
+      // ── Collect eligible items (B/C only) ──
+      const eligibleItems = [];
+      for (const item of triagedAll) {
+        const ruleGrade = item.grade;
+        const isEligible = ruleGrade === "B" || ruleGrade === "C";
+        if (!isEligible) {
+          item.rule_grade = ruleGrade;
+          item.semantic_grade = "";
+          item.final_grade = ruleGrade;
+          item.semantic_reason = "";
+          item.needs_human_review = false;
+          item.disagreement_type = "";
+          semanticGradingReport.items_skipped_not_eligible += 1;
+        } else {
+          item.rule_grade = ruleGrade;
+          eligibleItems.push(item);
+        }
+      }
+      semanticGradingReport.items_reviewed = eligibleItems.length;
+
+      // ── Query dedup by normTitle ──
+      const titleToItems = new Map();
+      for (const item of eligibleItems) {
+        const key = normTitle(item.title || "");
+        if (!key) {
+          item.semantic_grade = "";
+          item.final_grade = item.rule_grade;
+          item.semantic_reason = "";
+          item.needs_human_review = false;
+          item.disagreement_type = "";
+          continue;
+        }
+        if (!titleToItems.has(key)) titleToItems.set(key, []);
+        titleToItems.get(key).push(item);
+      }
+      semanticGradingReport.unique_query_count = titleToItems.size;
+      semanticGradingReport.items_deduped = eligibleItems.length - titleToItems.size;
+      semanticGradingReport.concurrency = Number(process.env.ZOTERO_SEMANTIC_CONCURRENCY || 8) || 8;
+
+      // ── Build batch samples (title-only query) ──
+      const uniqueEntries = [...titleToItems.entries()];
+      const batchSamples = uniqueEntries.map(([key, items], i) => ({
+        row_index: i,
+        feedback: "",
+        direction: "ignored",
+        semantic_query: key,
+        _key: key,
+        _items: items,
+      }));
+
+      let batchResults = [];
+      const searchStarted = Date.now();
+      try {
+        batchResults = await semanticAdapter.searchBatch(batchSamples);
+      } catch (err) {
+        semanticGradingReport.error = String(err?.message || err);
+        batchResults = batchSamples.map((s) => ({
+          ok: false,
+          results: [],
+          error: String(err?.message || err),
+        }));
+      }
+      semanticGradingReport.search_total_ms = Date.now() - searchStarted;
+      semanticGradingReport.search_avg_ms = batchSamples.length > 0
+        ? Math.round(semanticGradingReport.search_total_ms / batchSamples.length)
+        : 0;
+
+      // ── Process batch results ──
+      for (let i = 0; i < batchResults.length; i++) {
+        const searchResult = batchResults[i];
+        const items = batchSamples[i]._items;
+        const ruleGrade = items[0].rule_grade;
+
+        if (!searchResult.ok || !searchResult.results?.length) {
+          for (const item of items) {
+            item.semantic_grade = "";
+            item.final_grade = item.rule_grade;
+            item.semantic_reason = "";
+            item.needs_human_review = false;
+            item.disagreement_type = "";
+          }
+          continue;
+        }
+
+        const derived = deriveSemanticGradeFromFeedbackMatches({
+          searchResults: searchResult.results,
+          feedbackIndex: feedbackIdx,
+          ruleGrade,
+        });
+
+        const synthesized = synthesizeFinalGrade({
+          ruleGrade,
+          semanticGrade: derived.semanticGrade,
+          semanticReason: derived.semanticReason,
+          flags: items[0].flags,
+        });
+
+        for (const item of items) {
+          item.semantic_grade = derived.semanticGrade;
+          item.semantic_reason = derived.semanticReason;
+          item.final_grade = synthesized.finalGrade;
+          item.needs_human_review = synthesized.needsHumanReview;
+          item.disagreement_type = synthesized.disagreementType;
+        }
+
+        if (derived.matchedFeedbackCount > 0) {
+          semanticGradingReport.items_with_feedback_match += items.length;
+        }
+        if (synthesized.needsHumanReview) {
+          semanticGradingReport.items_needing_human_review += items.length;
+        }
+        if (derived.semanticGrade) {
+          semanticGradingReport.items_with_semantic_grade += items.length;
+        }
+        if (synthesized.finalGrade === ruleGrade) {
+          semanticGradingReport.final_grade_unchanged += items.length;
+        } else {
+          const gradeOrder = { A: 1, B: 2, C: 3, D: 4 };
+          if ((gradeOrder[synthesized.finalGrade] || 4) < (gradeOrder[ruleGrade] || 4)) {
+            semanticGradingReport.final_grade_upgraded += items.length;
+          } else {
+            semanticGradingReport.final_grade_downgraded += items.length;
+          }
+        }
+      }
+    }
+  } else if (semanticAdapter.enabled && !report.steps.ollama?.ok) {
+    // Semantic enabled but Ollama unavailable — keep rule_grade from semantic pass, clear semantic fields
+    semanticGradingReport.skipped_reason = semanticGradingReport.skipped_reason || "ollama_unavailable";
+    for (const item of triagedAll) {
+      if (!item.rule_grade) item.rule_grade = item.grade;
+      item.semantic_grade = "";
+      item.final_grade = item.rule_grade || item.grade;
+      item.semantic_reason = "";
+      item.needs_human_review = false;
+      item.disagreement_type = "";
+    }
+  } else {
+    semanticGradingReport.skipped_reason = "semantic_preference_disabled";
+    // When disabled, set default fields on all items
+    for (const item of triagedAll) {
+      item.rule_grade = item.grade;
+      item.semantic_grade = "";
+      item.final_grade = item.grade;
+      item.semantic_reason = "";
+      item.needs_human_review = false;
+      item.disagreement_type = "";
+    }
+  }
+
+  report.steps.semantic_grading = semanticGradingReport;
+
   const triageSummary = summarizeGradeCounts(triagedAll);
   let preferenceAuditWithImpact = buildPreferenceLearningAudit({
     medQueryLearning: report.steps.med_query_learning,
@@ -759,6 +954,14 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
 
     for (const s of dedupedNewSuggestions) existingSuggestionsLog.suggestions.push(s);
     await writeRuleSuggestionsLog(suggestionsLogPath, existingSuggestionsLog);
+
+    // Sync docx again to include newly generated suggestions in the Pending Rule Suggestions table
+    const pubmedConfigPathForSync = path.join(ROOT, "config", "pubmed_pmc_search.json");
+    await syncScreeningStandardsDocx(REVIEW_ROOT, {
+      pubmedConfigPath: pubmedConfigPathForSync,
+      evaluationText: "",
+      suggestionsLogPath,
+    });
 
     const allSuggestions = existingSuggestionsLog.suggestions;
     ruleSuggestionsReport.standards_rule_suggestions_count = allSuggestions.length;
@@ -866,6 +1069,7 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
   const writebackReadyRaw = buildWritebackReadyItems(triagedAll, { translationCache });
   const writebackReady = exportLimit ? writebackReadyRaw.slice(0, exportLimit) : writebackReadyRaw;
   const triaged = writebackReady;
+  const abcAllItems = triagedAll.filter((it) => it && it.grade && it.grade !== "D");
   const translationConfig = getTranslationConfig();
   report.steps.translation = {
     stage: "deferred_after_writeback",
@@ -913,8 +1117,8 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
     star_migration: {
       status: "managed_in_stage2_writeback",
       default_mode: process.env.ZOTERO_STAR_MIGRATION_MODE || "expand",
-      default_window_days: Number(process.env.ZOTERO_STAR_MIGRATION_WINDOW_DAYS || 14) || 14,
-      default_star_threshold: Number(process.env.ZOTERO_STAR_MIGRATION_MIN_STARS || 2) || 2,
+      default_window_days: Number(process.env.ZOTERO_STAR_MIGRATION_WINDOW_DAYS || 7) || 7,
+      default_star_threshold: Number(process.env.ZOTERO_STAR_MIGRATION_MIN_STARS || 4) || 4,
       note: "Stage1 不再直接执行迁移；真实迁移由 Stage2 writeback summary 输出。",
     },
     note: "Zotero information read/write/move must be executed via zotero-mcp. This script only produces ingestion+triage payload.",
@@ -960,7 +1164,7 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
   const desktopJsonPath = path.join(pipeDir, "desktop_daily_review_source.json");
   await fs.writeFile(desktopJsonPath, JSON.stringify({
     date: dateStr,
-    triaged,
+    triaged: abcAllItems,
     reportContext: {
       feedbackLearning: report.steps.feedback_learning,
       preferenceLearningAudit: preferenceAuditWithImpact,

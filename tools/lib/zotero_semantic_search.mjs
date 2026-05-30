@@ -24,6 +24,11 @@ function getMinScore() {
   const n = Number(process.env.ZOTERO_SEMANTIC_SEARCH_MIN_SCORE || 0.3);
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : 0.3;
 }
+function getConcurrency() {
+  const n = Number(process.env.ZOTERO_SEMANTIC_CONCURRENCY || 8);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 8;
+}
+
 function getLanguage() {
   const v = String(process.env.ZOTERO_SEMANTIC_SEARCH_LANGUAGE || "all").trim().toLowerCase();
   return v === "zh" || v === "en" || v === "all" ? v : "all";
@@ -139,6 +144,67 @@ export function createZoteroSemanticAdapter({
     }
   }
 
+  /**
+   * Single search without status check. Internal use only — caller must ensure status is OK.
+   */
+  async function searchOnce(sample) {
+    const query = String(sample?.semantic_query || "").trim();
+    if (!enabled) {
+      return toResult(sample, query, {
+        degrade_reason: "semantic_preference_disabled",
+        status: { checked: false, ok: null, raw: null, degraded: true, degrade_reason: "semantic_preference_disabled" },
+      });
+    }
+    if (!query) {
+      return toResult(sample, query, {
+        degrade_reason: "empty_semantic_query",
+        status: { checked: false, ok: null, raw: null, degraded: true, degrade_reason: "empty_semantic_query" },
+      });
+    }
+    try {
+      const json = await callTool("semantic_search", {
+        query,
+        topK: limit,
+        minScore,
+        language,
+      }, 860000 + Math.max(0, Number(sample?.row_index || 0)));
+      if (json?.error) {
+        const message = JSON.stringify(json.error);
+        const unverified = /unknown tool|not found|tool.*semantic_search|method not found/i.test(message);
+        return toResult(sample, query, {
+          degrade_reason: unverified ? "mcp_tool_unverified" : "semantic_tool_error",
+          error: message,
+          status: { checked: true, ok: false, raw: message, degraded: true, degrade_reason: unverified ? "mcp_tool_unverified" : "semantic_tool_error" },
+        });
+      }
+      const items = normalizeSemanticItems(json?.result);
+      return {
+        ok: true,
+        degraded: false,
+        degrade_reason: null,
+        query,
+        source_sample: {
+          row_index: sample?.row_index ?? -1,
+          feedback: sample?.feedback || "",
+          direction: sample?.direction || "ignored",
+        },
+        results: items,
+        status: { checked: true, ok: true, raw: null, degraded: false, degrade_reason: null },
+        error: null,
+      };
+    } catch (error) {
+      const timedOut = String(error?.name || "").toLowerCase().includes("abort");
+      return toResult(sample, query, {
+        degrade_reason: timedOut ? "semantic_timeout" : "semantic_mcp_unreachable",
+        error: String(error?.message || error),
+        status: { checked: true, ok: false, raw: String(error?.message || error), degraded: true, degrade_reason: timedOut ? "semantic_timeout" : "semantic_mcp_unreachable" },
+      });
+    }
+  }
+
+  /**
+   * Single search with status check (backward-compatible public API).
+   */
   async function semanticSearch(sample) {
     const query = String(sample?.semantic_query || "").trim();
     if (!enabled) {
@@ -160,45 +226,39 @@ export function createZoteroSemanticAdapter({
         status,
       });
     }
-    try {
-      const json = await callTool("semantic_search", {
-        query,
-        topK: limit,
-        minScore,
-        language,
-      }, 860000 + Math.max(0, Number(sample?.row_index || 0)));
-      if (json?.error) {
-        const message = JSON.stringify(json.error);
-        const unverified = /unknown tool|not found|tool.*semantic_search|method not found/i.test(message);
+    return searchOnce(sample);
+  }
+
+  /**
+   * Batch search with single status check and controlled concurrency.
+   * @param {Array} items - Array of sample objects with semantic_query
+   * @param {Object} opts
+   * @param {number} opts.concurrency - Max parallel calls (default from env)
+   * @returns {Promise<Array>} Results in same order as items
+   */
+  async function searchBatch(items, { concurrency = getConcurrency() } = {}) {
+    if (!items.length) return [];
+    const status = await checkSemanticStatus();
+    if (status.degraded) {
+      return items.map((sample) => {
+        const query = String(sample?.semantic_query || "").trim();
         return toResult(sample, query, {
-          degrade_reason: unverified ? "mcp_tool_unverified" : "semantic_tool_error",
-          error: message,
+          degrade_reason: status.degrade_reason,
           status,
         });
-      }
-      const items = normalizeSemanticItems(json?.result);
-      return {
-        ok: true,
-        degraded: false,
-        degrade_reason: null,
-        query,
-        source_sample: {
-          row_index: sample?.row_index ?? -1,
-          feedback: sample?.feedback || "",
-          direction: sample?.direction || "ignored",
-        },
-        results: items,
-        status,
-        error: null,
-      };
-    } catch (error) {
-      const timedOut = String(error?.name || "").toLowerCase().includes("abort");
-      return toResult(sample, query, {
-        degrade_reason: timedOut ? "semantic_timeout" : "semantic_mcp_unreachable",
-        error: String(error?.message || error),
-        status: { checked: true, ok: false, raw: String(error?.message || error), degraded: true, degrade_reason: timedOut ? "semantic_timeout" : "semantic_mcp_unreachable" },
       });
     }
+    const results = new Array(items.length);
+    let idx = 0;
+    const workerCount = Math.min(concurrency, items.length);
+    async function worker() {
+      while (idx < items.length) {
+        const i = idx++;
+        results[i] = await searchOnce(items[i]);
+      }
+    }
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    return results;
   }
 
   return {
@@ -213,5 +273,7 @@ export function createZoteroSemanticAdapter({
     dimensionsHint,
     checkSemanticStatus,
     semanticSearch,
+    searchOnce,
+    searchBatch,
   };
 }

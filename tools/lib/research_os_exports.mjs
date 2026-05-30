@@ -6,7 +6,7 @@ function pyJson(value) {
   return JSON.stringify(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
-export const DAILY_REVIEW_HEADERS = ["英文标题","标题翻译","推荐等级","期刊/来源","来源等级","feedback","comment","已处理时间","处理状态","备注"];
+export const DAILY_REVIEW_HEADERS = ["英文标题","标题翻译","规则等级","语义等级","最终等级","期刊/来源","反馈","评价"];
 
 export function buildSkillAlignmentMatrix({
   feedbackLearning = {},
@@ -101,39 +101,68 @@ def apply_header(ws, headers):
         cell.font = header_font
     ws.freeze_panes = "A2"
 
+def extract_grade_letter(item, keys):
+    import re
+    for k in keys:
+        raw = str(item.get(k, "")).strip()
+        if not raw:
+            continue
+        m = re.match(r'^[ABCD]', raw, re.IGNORECASE)
+        if m:
+            return m.group(0).upper()
+    return ""
+
+def clean_journal_source(item):
+    import re
+    raw = str(item.get("journal", "") or item.get("publicationTitle", "") or item.get("source_platform", "")).strip()
+    if not raw:
+        return ""
+    cleaned = re.sub(r':\s*Latest Articles\s*\(.*?\)\s*$', '', raw, flags=re.IGNORECASE)
+    cleaned = re.sub(r':\s*Latest Articles\s*$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r':\s*Table of Contents\s*$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*[-–—]\s*Wiley Online Library\s*$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s*[-–—]\s*Wiley\s*$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'^ScienceDirect Publication:\s*', '', cleaned, flags=re.IGNORECASE).strip()
+    noise = {"Latest Results", "Wiley", "Wiley Online Library", "ScienceDirect", "ACS Publications"}
+    if cleaned in noise:
+        return ""
+    return cleaned
+
 def create_daily_review(rows):
     wb = Workbook()
     ws = wb.active
     ws.title = "每日反馈"
-    headers = ["英文标题","标题翻译","推荐等级","期刊/来源","来源等级","feedback","comment","已处理时间","处理状态","备注"]
+    headers = ["英文标题","标题翻译","规则等级","语义等级","最终等级","期刊/来源","反馈","评价"]
     apply_header(ws, headers)
     for it in rows:
         translated_title = it.get("标题翻译","") or it.get("中文标题","") or it.get("shortTitle","") or it.get("title","")
+        rule_grade = extract_grade_letter(it, ["rule_grade", "ruleGrade", "original_grade", "initial_grade", "grade"])
+        semantic_grade = extract_grade_letter(it, ["semantic_grade", "semanticGrade"])
+        final_grade = extract_grade_letter(it, ["final_grade", "finalGrade", "adjusted_grade", "grade"])
+        source = clean_journal_source(it)
         ws.append([
             it.get("title",""),
             translated_title,
-            it.get("推荐等级",""),
-            ((it.get("journal","") or it.get("source_platform","")).replace("ScienceDirect Publication:","").strip()),
-            "abstract_only",
+            rule_grade,
+            semantic_grade,
+            final_grade,
+            source,
             "",
             "",
-            "",
-            "待反馈",
-            ""
         ])
     max_row = max(ws.max_row, 2)
-    dv_grade = DataValidation(type="list", formula1='"A课题相关,B专题相关,C领域相关,D无关"')
+    dv_rule = DataValidation(type="list", formula1='"A,B,C,D"')
+    dv_semantic = DataValidation(type="list", formula1='"A,B,C,D"')
+    dv_final = DataValidation(type="list", formula1='"A,B,C,D"')
     dv_feedback = DataValidation(type="list", formula1='"keep,drop,upgrade,downgrade"')
-    dv_status = DataValidation(type="list", formula1='"待反馈,已学习,跳过,需复核"')
-    dv_source = DataValidation(type="list", formula1='"metadata_only,abstract_only,pdf_fulltext"')
-    ws.add_data_validation(dv_grade)
+    ws.add_data_validation(dv_rule)
+    ws.add_data_validation(dv_semantic)
+    ws.add_data_validation(dv_final)
     ws.add_data_validation(dv_feedback)
-    ws.add_data_validation(dv_status)
-    ws.add_data_validation(dv_source)
-    dv_grade.add(f"C2:C{max_row}")
-    dv_source.add(f"E2:E{max_row}")
-    dv_feedback.add(f"F2:F{max_row}")
-    dv_status.add(f"I2:I{max_row}")
+    dv_rule.add(f"C2:C{max_row}")
+    dv_semantic.add(f"D2:D{max_row}")
+    dv_final.add(f"E2:E{max_row}")
+    dv_feedback.add(f"G2:G{max_row}")
     return wb
 
 def save_workbook(wb, file_path):
