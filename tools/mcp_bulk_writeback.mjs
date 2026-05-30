@@ -20,7 +20,7 @@ const RUNTIME = buildRuntimeConfig();
 const ROOT = RUNTIME.projectRoot;
 const RESEARCH_ROOT = RUNTIME.researchRoot;
 const MCP_URL = process.env.ZOTERO_MCP_URL || process.env.MCP_URL || "http://127.0.0.1:23120/mcp";
-const TODAY = new Date();
+const TODAY = RUNTIME.now;
 const mcpCallCounters = new Map();
 
 function fmtDate(d) {
@@ -138,7 +138,7 @@ async function ensureChildCollection(parentKey, name, callIdBase) {
 }
 
 function buildExtra(it) {
-  return [
+  return safeStr([
     it.pmid ? `PMID: ${it.pmid}` : "",
     it.pmcid ? `PMCID: ${it.pmcid}` : "",
     it.doi ? `DOI: ${it.doi}` : "",
@@ -146,7 +146,7 @@ function buildExtra(it) {
     `source_platform: ${it.source_platform || ""}`,
     `grade: ${it.grade || ""}`,
     `grade_label: ${it.grade_label || it["推荐等级"] || ""}`,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n"));
 }
 
 function norm(s) {
@@ -163,14 +163,46 @@ function normDoi(s) {
 function normalizeTitleForMatch(s) {
   return String(s || "")
     .normalize("NFKC")
-    .replace(/[\u2010-\u2015]/g, "-")
-    .replace(/[“”]/g, "\"")
-    .replace(/[‘’]/g, "'")
-    .replace(/\s+/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/[\u2010-\u2015\u2212\uff0d]/g, "-")
+    .replace(/[\u2018\u2019\u201A\u201B\u02BC\u2032\uff07]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\uff02]/g, '"')
+    .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ")
+    .replace(/[\uFE30\uFE31\uFE32\uFE33\uFE34\uFE58\uFE63\uff0d]/g, "-")
+    .replace(/\.{3}/g, " ")
+    .replace(/…/g, " ")
+    .replace(/~/g, " ")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/[\uff10-\uff19]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFF10 + 48))
+    .replace(/[\uff21-\uff3a]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFF21 + 97))
+    .replace(/[\uff41-\uff5a]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFF41 + 97))
+    .replace(/[\u00bc-\u00be]/g, (ch) => ({ "\u00bc": "1/4", "\u00bd": "1/2", "\u00be": "3/4" }[ch] || ch))
+    .replace(/[\u2150-\u215f]/g, (ch) => ({
+      "\u2150": "1/7", "\u2151": "1/9", "\u2152": "1/10", "\u2153": "1/3", "\u2154": "2/3", "\u2155": "1/5", "\u2156": "2/5", "\u2157": "3/5", "\u2158": "4/5", "\u2159": "1/6", "\u215a": "5/6", "\u215b": "1/8", "\u215c": "3/8", "\u215d": "5/8", "\u215e": "7/8", "\u215f": "1"
+    }[ch] || ch))
+    .replace(/[\u2460-\u2473\u2474-\u2487\u2488-\u249b\u3251-\u325f\u3260-\u327e\u3280-\u32bf\u32d0-\u32fe]/g, (ch) => {
+      const code = ch.charCodeAt(0);
+      if (code >= 0x2460 && code <= 0x2473) return String(code - 0x2460 + 1);
+      if (code >= 0x2474 && code <= 0x2487) return String(code - 0x2474 + 1);
+      if (code >= 0x2488 && code <= 0x249b) return String(code - 0x2488 + 1);
+      if (code >= 0x3251 && code <= 0x325f) return String(code - 0x3251 + 21);
+      if (code >= 0x3260 && code <= 0x327e) return String(code - 0x3260 + 1);
+      if (code >= 0x3280 && code <= 0x32bf) return String(code - 0x3280 + 1);
+      if (code >= 0x32d0 && code <= 0x32fe) return String(code - 0x32d0 + 1);
+      return " ";
+    })
+    .replace(/[\u2460-\u2473\u2474-\u2487\u2488-\u249b\u3251-\u325f\u3260-\u327e\u3280-\u32bf\u32d0-\u32fe]/g, " ")
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060\ufeff]/g, "")
     .replace(/[^a-z0-9\u4e00-\u9fff]+/g, " ")
     .trim();
 }
+
 
 function getFingerprints(it) {
   const doi = normDoi(it?.doi || it?.DOI || "");
@@ -269,24 +301,39 @@ async function findExistingByExactFields(it, idBase) {
   return null;
 }
 
+function safeStr(v) {
+  return String(v || "")
+    // Remove control chars except \t \n \r
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .normalize("NFC");
+}
+
 async function createItem(it, i) {
   const fields = {
-    title: it.title || "",
-    url: it.url || "",
-    DOI: it.doi || "",
-    date: it.pubdate || "",
-    publicationTitle: it.journal || "",
-    abstractNote: it.abstract || "",
+    title: safeStr(it.title),
+    url: safeStr(it.url),
+    DOI: safeStr(it.doi),
+    date: safeStr(it.pubdate),
+    publicationTitle: safeStr(it.journal),
+    abstractNote: safeStr(it.abstract),
     extra: buildExtra(it),
   };
   const itemType = "journalArticle";
-  const created = await mcpToolCall("write_item", {
-    action: "create",
-    itemType,
-    fields,
-    tags: ["research-os", "自动入库", it.grade_label || it["推荐等级"] || "", it.source_channel || ""],
-  }, 10000 + i * 3);
-  return parseToolText(created)?.data?.itemKey;
+  const tags = ["research-os", "自动入库", it.grade_label || it["推荐等级"] || "", it.source_channel || ""]
+    .filter((t) => String(t || "").trim());
+  try {
+    const created = await mcpToolCall("write_item", {
+      action: "create",
+      itemType,
+      fields,
+      tags,
+    }, 10000 + i * 3);
+    return parseToolText(created)?.data?.itemKey;
+  } catch (e) {
+    const safe = { title: fields.title?.slice(0, 80), doi: fields.DOI, idx: i };
+    console.error(`[createItem] MCP write_item failed for item #${i}:`, JSON.stringify(safe), String(e?.message || e).slice(0, 200));
+    throw e;
+  }
 }
 
 function parseStarLevel(tags) {
@@ -355,6 +402,7 @@ export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, 
     skipped_already_exists: 0,
     removed_from_source_collections: 0,
     removed_from_grade_collections: 0,
+    removed_from_root_pool: 0,
     removal_failures: [],
     add_failures: [],
     errors: [],
@@ -461,6 +509,15 @@ export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, 
           stats.removal_failures.push({ itemKey, collectionKey, error: String(error?.message || error), phase: "remove_from_day_collections" });
         }
       }
+
+      // Also remove from root pool to keep root and date subcollections in sync
+      try {
+        await mcpToolCall("remove_items_from_collection", { collectionKey: rootKey, itemKeys: [itemKey] }, 720000 + stats.removed_from_root_pool);
+        stats.removed_from_root_pool += 1;
+      } catch (error) {
+        stats.errors.push({ itemKey, collectionKey: rootKey, error: String(error?.message || error), phase: "remove_from_root_pool" });
+        stats.removal_failures.push({ itemKey, collectionKey: rootKey, error: String(error?.message || error), phase: "remove_from_root_pool" });
+      }
     }
   }
 
@@ -540,6 +597,42 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
   } catch {
     // 待删除集合不存在或无法访问时忽略
   }
+
+  // 构建"值得精读"去重索引：已进入值得精读集合的条目不再重复入库
+  let worthyIndex = { byDoi: new Map(), byPmid: new Map(), byPmcid: new Map(), byArxiv: new Map(), byTitle: new Map(), meta: new Map() };
+  let worthyItemCount = 0;
+  try {
+    const worthyCollection = worthy || await findCollectionByName("值得精读");
+    if (worthyCollection?.key) {
+      const worthyKeys = await getCollectionItemKeys(worthyCollection.key, 538000);
+      for (let wi = 0; wi < worthyKeys.length; wi++) {
+        const itemKey = worthyKeys[wi];
+        try {
+          const det = parseToolText(await mcpToolCall("get_item_details", { itemKey, mode: "preview" }, 539000 + wi));
+          const d = det?.data || det || {};
+          const fp = getFingerprints({
+            doi: d.DOI || d.doi || "",
+            pmid: d.extra && String(d.extra).match(/PMID:\s*([^\s]+)/i)?.[1],
+            pmcid: d.extra && String(d.extra).match(/PMCID:\s*([^\s]+)/i)?.[1],
+            arxiv: d.extra && String(d.extra).match(/arXiv:\s*([^\s]+)/i)?.[1],
+            title: d.title || det?.title || "",
+          });
+          pushIndex(worthyIndex.byDoi, fp.doi, itemKey);
+          pushIndex(worthyIndex.byPmid, fp.pmid, itemKey);
+          pushIndex(worthyIndex.byPmcid, fp.pmcid, itemKey);
+          pushIndex(worthyIndex.byArxiv, fp.arxiv, itemKey);
+          pushIndex(worthyIndex.byTitle, fp.title, itemKey);
+          worthyIndex.meta.set(itemKey, { title: d.title || det?.title || "" });
+          worthyItemCount++;
+        } catch {
+          // ignore broken item read
+        }
+      }
+    }
+  } catch {
+    // 值得精读集合不存在或无法访问时忽略
+  }
+
   const dateKey = isolatedCalibration ? root.key : await ensureChildCollection(root.key, dateStr, 50);
 
   const sourceKeys = {};
@@ -572,6 +665,7 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
     skipped_historical_duplicate: 0, // backward compatibility
     skipped_duplicate_in_pool: 0,
     skipped_duplicate_in_trash: 0,
+    skipped_duplicate_in_worthy: 0,
   };
   const failures = [];
   const skippedDuplicatesInPool = [];
@@ -624,6 +718,7 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
       let itemKey = duplicateMatch?.itemKey || "";
       let duplicateInPool = Boolean(itemKey);
       let duplicateInTrash = false;
+      let duplicateInWorthy = false;
       if (!duplicateInPool) {
         // 如果文献池中未找到，检查待删除集合
         duplicateMatch = findByIndex(it, trashIndex);
@@ -634,6 +729,15 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
         }
       }
       if (!duplicateInPool && !duplicateInTrash) {
+        // 如果文献池和待删除中均未找到，检查值得精读集合
+        duplicateMatch = findByIndex(it, worthyIndex);
+        itemKey = duplicateMatch?.itemKey || "";
+        duplicateInWorthy = Boolean(itemKey);
+        if (duplicateInWorthy) {
+          duplicateMatch = { ...duplicateMatch, reason: (duplicateMatch.reason || "").replace("duplicate_", "duplicate_worthy_") };
+        }
+      }
+      if (!duplicateInPool && !duplicateInTrash && !duplicateInWorthy) {
         itemKey = await findExistingByExactFields(it, 700000 + i * 5);
       }
       if (duplicateInPool) duplicatePreventedCount += 1;
@@ -698,6 +802,25 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
         return;
       }
 
+      // 值得精读去重：已进入值得精读集合的条目不再重复入库
+      if (duplicateInWorthy) {
+        counters.skipped_duplicate_in_worthy++;
+        if (duplicateRecords.length < 500) {
+          duplicateRecords.push({
+            candidate_id: i,
+            title: (it.title || "").slice(0, 300),
+            duplicate_reason: duplicateMatch?.reason || "duplicate_in_worthy",
+            matched_pool_item_key: itemKey || "",
+            matched_identifier_type: duplicateMatch?.type || "unknown",
+            matched_identifier_value: duplicateMatch?.value || "",
+            pool_item_title: worthyIndex.meta?.get(itemKey)?.title || "",
+            action: "skipped_duplicate_in_worthy",
+          });
+        }
+        writebackRecords.push({ idx: i, dedupe_key: dedupeKey, itemKey, status: "skipped_duplicate_in_worthy" });
+        return;
+      }
+
       if (!itemKey) {
         for (let attempt = 0; attempt <= writebackRetryLimit; attempt++) {
           try {
@@ -707,7 +830,7 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
             if (attempt >= writebackRetryLimit) throw createError;
             retryCount += 1;
             // Retry must re-check dedupe before a second create attempt.
-            const recheck = findByIndex(it, poolIndex) || findByIndex(it, trashIndex) || await findExistingByExactFields(it, 760000 + i * 5 + attempt);
+            const recheck = findByIndex(it, poolIndex) || findByIndex(it, trashIndex) || findByIndex(it, worthyIndex) || await findExistingByExactFields(it, 760000 + i * 5 + attempt);
             if (recheck) {
               itemKey = recheck;
               duplicatePreventedCount += 1;
@@ -925,9 +1048,18 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
       arxiv: poolIndex.byArxiv?.size || 0,
       title: poolIndex.byTitle?.size || 0,
     },
+    worthy_duplicate_index_counts: {
+      doi: worthyIndex.byDoi?.size || 0,
+      pmid: worthyIndex.byPmid?.size || 0,
+      pmcid: worthyIndex.byPmcid?.size || 0,
+      arxiv: worthyIndex.byArxiv?.size || 0,
+      title: worthyIndex.byTitle?.size || 0,
+    },
     skipped_duplicate_in_pool: skippedDuplicatesInPool,
     skipped_duplicate_in_trash: skippedDuplicatesInTrash,
     trash_index_item_count: trashItemCount,
+    skipped_duplicate_in_worthy: counters.skipped_duplicate_in_worthy,
+    worthy_index_item_count: worthyItemCount,
     duplicate_records: duplicateRecords,
     reused_existing_added_to_pool_and_current_date: counters.reused_existing,
     added_to_current_date_collection: counters.added_to_daily_collection,
@@ -1023,6 +1155,8 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
     runReport.writeback_pool_duplicates_skipped = counters.skipped_duplicate_in_pool;
     runReport.writeback_trash_duplicates_skipped = counters.skipped_duplicate_in_trash;
     runReport.writeback_trash_index_items = trashItemCount;
+    runReport.writeback_worthy_duplicates_skipped = counters.skipped_duplicate_in_worthy;
+    runReport.writeback_worthy_index_items = worthyItemCount;
     runReport.writeback_added_to_pool = counters.added_to_pool;
     runReport.writeback_added_to_current_date_collection = counters.added_to_daily_collection;
     runReport.writeback_pool_add_failed = poolAddFailed;
@@ -1033,6 +1167,8 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
     runReport.signals.duplicate_in_pool = counters.skipped_duplicate_in_pool > 0;
     runReport.signals.duplicate_in_trash = counters.skipped_duplicate_in_trash > 0;
     runReport.signals.trash_index_loaded = trashItemCount > 0;
+    runReport.signals.duplicate_in_worthy = counters.skipped_duplicate_in_worthy > 0;
+    runReport.signals.worthy_index_loaded = worthyItemCount > 0;
     runReport.signals.pool_add_failed = poolAddFailed > 0;
     runReport.signals.current_date_add_failed = currentDateAddFailed > 0;
     runReport.signals.history_collection_modification_forbidden = HISTORY_COLLECTION_MODIFICATION_FORBIDDEN;

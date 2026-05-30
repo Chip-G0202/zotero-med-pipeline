@@ -5,8 +5,14 @@ import { shouldStopBackfillByRisk } from "./lib/translation_backfill_support.mjs
 
 const ROOT = process.env.ZOTERO_PROJECT_ROOT || path.resolve(".");
 const RESEARCH_ROOT = path.join(ROOT, "research_os");
-const MCP_URL = "http://127.0.0.1:23120/mcp";
-const ZOTERO_EXE = "D:/Zotero/zotero.exe";
+// MCP_URL: Default is http://127.0.0.1:23120/mcp.
+// If your Zotero MCP plugin uses a different port, set ZOTERO_MCP_URL in your environment or .env file.
+const MCP_URL = process.env.ZOTERO_MCP_URL || "http://127.0.0.1:23120/mcp";
+// ZOTERO_EXE: Default candidates are used if not set.
+// Windows: D:/Zotero/zotero.exe (or C:/Program Files/Zotero/zotero.exe)
+// macOS: /Applications/Zotero.app/Contents/MacOS/zotero or /Applications/Zotero.app
+// The system attempts to auto-detect or launch by app name on macOS.
+const ZOTERO_EXE = process.env.ZOTERO_EXE || (process.platform === "win32" ? "D:/Zotero/zotero.exe" : "zotero");
 const PW_SH = process.env.PWSH_PATH || "pwsh";
 const TODAY = new Date();
 

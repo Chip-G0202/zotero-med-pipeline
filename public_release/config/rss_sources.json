@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "description": "用户可编辑：RSS 订阅源列表。enabled=false 可临时停用某个源。",
-  "sources": [
-    { "name": "Example Journal 1", "url": "https://example.com/journal1.rss", "enabled": true },
-    { "name": "Example Journal 2", "url": "https://example.com/journal2.rss", "enabled": true },
-    { "name": "Example Journal 3", "url": "https://example.com/journal3.rss", "enabled": false }
-  ]
-}

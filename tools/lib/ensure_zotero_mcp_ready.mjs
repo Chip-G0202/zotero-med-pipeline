@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
-const DEFAULT_ZOTERO_EXE = "D:/Zotero/zotero.exe";
 const DEFAULT_MCP_URL = "http://127.0.0.1:23120/mcp";
 const DEFAULT_POST_START_DELAY_MS = 3000;
 const DEFAULT_RETRIES = 10;
@@ -65,11 +64,57 @@ function makeError(code, message, details) {
   return err;
 }
 
+function isWindowsPlatform() {
+  return process.platform === "win32";
+}
+
+function platformName() {
+  return process.platform;
+}
+
+function defaultZoteroExePath() {
+  if (isWindowsPlatform()) return "D:/Zotero/zotero.exe";
+  if (process.platform === "darwin") return "/Applications/Zotero.app/Contents/MacOS/zotero";
+  return "zotero";
+}
+
+function platformProcessCheckStrategy() {
+  if (isWindowsPlatform()) return "tasklist+powershell";
+  if (process.platform === "darwin") return "pgrep+ps";
+  return "pgrep+ps";
+}
+
+function platformLaunchStrategy() {
+  if (isWindowsPlatform()) return "powershell_start_process";
+  if (process.platform === "darwin") return "open_macos";
+  return "node_spawn";
+}
+
+function fallbackMacAppPath() {
+  return "/Applications/Zotero.app";
+}
+
 function resolveZoteroExe() {
   const envOverride = toPosix(process.env.ZOTERO_EXE || "");
-  const candidate = envOverride || DEFAULT_ZOTERO_EXE;
   const source = envOverride ? "env" : "default";
-  return { path: candidate, source, exists: fileExists(candidate) };
+
+  if (envOverride) {
+    return { path: envOverride, source, exists: fileExists(envOverride) };
+  }
+
+  const primary = defaultZoteroExePath();
+  if (fileExists(primary)) {
+    return { path: primary, source, exists: true };
+  }
+
+  if (!isWindowsPlatform()) {
+    const fallback = fallbackMacAppPath();
+    if (fileExists(fallback)) {
+      return { path: fallback, source, exists: true };
+    }
+  }
+
+  return { path: primary, source, exists: false };
 }
 
 function getMcpUrl() {
@@ -113,12 +158,37 @@ function runTasklistProbe() {
   };
 }
 
+function runMacPsProbe() {
+  const result = spawnSync("ps", ["-A", "-o", "comm="], { encoding: "utf8" });
+  const base = sanitizeSpawnResult("process_check_ps_macos", "ps -A -o comm=", result);
+  const txt = `\n${result.stdout || ""}\n${result.stderr || ""}\n`.toLowerCase();
+  const macOsMarkers = ["zotero", "/contents/macos/zotero"];
+  const running = macOsMarkers.some((marker) => txt.includes(marker));
+
+  if (result.status === 0) {
+    return { ok: true, running, method: "ps_macos", error: null, raw: base };
+  }
+
+  return {
+    ok: false,
+    running: null,
+    method: "ps_macos",
+    error: result.error ? String(result.error) : (base.stderr || base.stdout || "unknown"),
+    raw: base,
+  };
+}
+
 function detectProcessWithFallback(diagnostics) {
-  const methods = [
-    () => runTasklistProbe(),
-    () => runPowerShellProbe("powershell.exe"),
-    () => runPowerShellProbe("pwsh"),
-  ];
+  const methods = isWindowsPlatform()
+    ? [
+        () => runTasklistProbe(),
+        () => runPowerShellProbe("powershell.exe"),
+        () => runPowerShellProbe("pwsh"),
+      ]
+    : [
+        () => runMacPsProbe(),
+        () => runPowerShellProbe("pwsh"),
+      ];
   let firstPermError = null;
   for (const run of methods) {
     const r = run();
@@ -157,6 +227,15 @@ function startWithPowerShell(exe, zoteroExe, workingDirectory) {
   const script = `Start-Process -FilePath ${quoteForPowerShell(zoteroExe)} -WorkingDirectory ${quoteForPowerShell(workingDirectory)}`;
   const result = spawnSync(exe, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8" });
   return sanitizeSpawnResult(`launch_${exe}`, `${exe} Start-Process <zotero>`, result);
+}
+
+function startWithMacOpen(zoteroExe) {
+  const isAppBundle = zoteroExe.toLowerCase().endsWith(".app") || zoteroExe.includes("/Zotero.app");
+  const args = isAppBundle ? ["-a", zoteroExe] : ["-a", "Zotero"];
+  const command = `open ${args.join(" ")}`;
+  const result = spawnSync("open", args, { encoding: "utf8" });
+  const base = sanitizeSpawnResult("launch_open_macos", command, result);
+  return { ...base, success: base.success || result?.status === 0 };
 }
 
 async function startWithNodeSpawn(zoteroExe, workingDirectory) {
@@ -247,6 +326,7 @@ export async function ensureZoteroMcpReady({
   const getExternalLauncherModeFn = dependencies.getExternalLauncherMode || getExternalLauncherMode;
   const detectProcessWithFallbackFn = dependencies.detectProcessWithFallback || detectProcessWithFallback;
   const startWithPowerShellFn = dependencies.startWithPowerShell || startWithPowerShell;
+  const startWithMacOpenFn = dependencies.startWithMacOpen || startWithMacOpen;
   const startWithNodeSpawnFn = dependencies.startWithNodeSpawn || startWithNodeSpawn;
   const allLaunchAttemptsPermissionDeniedFn = dependencies.allLaunchAttemptsPermissionDenied || allLaunchAttemptsPermissionDenied;
   const makeErrorFn = dependencies.makeError || makeError;
@@ -256,12 +336,16 @@ export async function ensureZoteroMcpReady({
   const workingDirectory = toPosix(path.dirname(zoteroExe));
   const mcpUrl = getMcpUrl();
   const diagnostics = {
+    platform: platformName(),
     launchMode: "local_fallback_only",
     expectedExternalLauncher: "desktop_commander",
     expectedLauncherTool: "mcp__desktop_commander__.start_process",
     expectedLauncherCommand: DESKTOP_COMMANDER_FIXED_COMMAND,
     scheduledTaskName: SCHEDULED_TASK_NAME,
     zoteroExe,
+    zoteroExeSource: resolved.source,
+    processCheckStrategy: platformProcessCheckStrategy(),
+    launchStrategy: platformLaunchStrategy(),
     workingDirectory,
     mcpUrl,
     initialMcpReady: false,
@@ -311,7 +395,10 @@ export async function ensureZoteroMcpReady({
   }
 
   if (!resolved.exists) {
-    throw makeErrorFn("ZOTERO_EXE_NOT_FOUND", `zotero executable not found at ${zoteroExe}`, diagnostics);
+    const suggestion = isWindowsPlatform()
+      ? "Set ZOTERO_EXE to the installed Zotero executable path, for example D:/Zotero/zotero.exe."
+      : "Set ZOTERO_EXE to the installed Zotero executable path, for example /Applications/Zotero.app/Contents/MacOS/zotero.";
+    throw makeErrorFn("ZOTERO_EXE_NOT_FOUND", `zotero executable not found at ${zoteroExe}. ${suggestion}`, diagnostics);
   }
 
   const processState = detectProcessWithFallbackFn(diagnostics);
@@ -327,9 +414,17 @@ export async function ensureZoteroMcpReady({
   if (!processState.available || processState.running !== true) {
     diagnostics.launchAttempted = true;
     const attempts = [];
-    diagnostics.fallbackUsed = true;
-    diagnostics.fallbackMethod = "powershell.exe";
-    attempts.push(startWithPowerShellFn("powershell.exe", zoteroExe, workingDirectory));
+
+    if (isWindowsPlatform()) {
+      diagnostics.fallbackUsed = true;
+      diagnostics.fallbackMethod = "powershell.exe";
+      attempts.push(startWithPowerShellFn("powershell.exe", zoteroExe, workingDirectory));
+    } else {
+      diagnostics.fallbackUsed = true;
+      diagnostics.fallbackMethod = "open_macos";
+      attempts.push(startWithMacOpenFn(zoteroExe));
+    }
+
     if (!attempts.some((a) => a.success)) {
       diagnostics.fallbackUsed = true;
       diagnostics.fallbackMethod = "node_spawn";
@@ -385,7 +480,7 @@ export async function ensureZoteroMcpReady({
     }
   }
 
-  const postProcess = detectProcessWithFallback(diagnostics);
+  const postProcess = detectProcessWithFallbackFn(diagnostics);
   if (!postProcess.available && postProcess.blocked) {
     throw makeErrorFn(
       "MCP_NOT_READY_AFTER_ZOTERO_START",

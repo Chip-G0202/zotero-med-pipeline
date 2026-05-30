@@ -11,12 +11,13 @@ import {
 } from "./lib/translation_backfill_support.mjs";
 import { ensureZoteroMcpReady } from "./lib/ensure_zotero_mcp_ready.mjs";
 import { buildRuntimeConfig } from "./lib/runtime_config.mjs";
+import { parseToolText } from "./lib/writeback_support.mjs";
 
 const RUNTIME = buildRuntimeConfig();
 const ROOT = RUNTIME.projectRoot;
 const RESEARCH_ROOT = RUNTIME.researchRoot;
 const MCP_URL = process.env.ZOTERO_MCP_URL || process.env.MCP_URL || "http://127.0.0.1:23120/mcp";
-const TODAY = new Date();
+const TODAY = RUNTIME.now;
 
 function fmtDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -61,6 +62,77 @@ async function ensureMcpReady() {
   });
 }
 
+function parseDateNameToDate(name) {
+  const m = String(name || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function inLastNDays(d, now, days) {
+  if (!d) return false;
+  const n = Math.max(1, Math.floor(Number(days || 7)));
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - n);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return d >= start && d <= end;
+}
+
+const GRADE_NAMES = ["A课题相关", "B专题相关", "C领域相关"];
+
+async function collectExistingItemsMissingShortTitle(rootKey, existingKeys, { now = new Date(), windowDays = 14, idBase = 1100000 } = {}) {
+  const scannedKeys = [];
+  const scanStats = { date_collections_scanned: 0, items_scanned: 0, items_missing_shorttitle: 0, errors: 0 };
+
+  try {
+    const tree = parseToolText(await mcpToolCall("get_subcollections", { collectionKey: rootKey, recursive: true }, idBase));
+    const dateNodes = (tree || []).filter((node) => inLastNDays(parseDateNameToDate(node?.name), now, windowDays));
+
+    for (const node of dateNodes) {
+      const childMap = new Map((node.subcollections || []).map((c) => [c.name, c]));
+      const gradeCollections = GRADE_NAMES.map((name) => childMap.get(name)).filter(Boolean);
+      if (!gradeCollections.length) continue;
+      scanStats.date_collections_scanned += 1;
+
+      for (const gc of gradeCollections) {
+        let offset = 0;
+        const limit = 200;
+        while (true) {
+          const items = parseToolText(await mcpToolCall("get_collection_items", { collectionKey: gc.key, limit, offset }, idBase + 100 + offset));
+          if (!Array.isArray(items) || !items.length) break;
+
+          for (const item of items) {
+            if (!item?.key || existingKeys.has(item.key)) continue;
+            existingKeys.add(item.key);
+            scanStats.items_scanned += 1;
+
+            try {
+              const detail = parseToolText(await mcpToolCall("get_item_details", { itemKey: item.key, mode: "preview" }, idBase + 200 + scanStats.items_scanned));
+              const data = detail?.data || detail || {};
+              const shortTitle = String(data.shortTitle || "").trim();
+              if (!shortTitle) {
+                scanStats.items_missing_shorttitle += 1;
+                scannedKeys.push({
+                  itemKey: item.key,
+                  title: data.title || "",
+                  grade: gc.name.replace(/[课题专题领域相关]/g, "").charAt(0) || "C",
+                  source_channel: "pool_scan",
+                });
+              }
+            } catch {
+              scanStats.errors += 1;
+            }
+          }
+          if (items.length < limit) break;
+          offset += limit;
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`[translation_backfill] pool scan error: ${String(e?.message || e).slice(0, 200)}`);
+  }
+
+  return { candidates: scannedKeys, scanStats };
+}
+
 export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
   const stageStarted = Date.now();
   await ensureMcpReady();
@@ -79,9 +151,25 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
   const limit = limitArg ? Number(limitArg.split("=")[1]) : null;
   const offsetArg = argv.find((x) => x.startsWith("--offset="));
   const offset = offsetArg ? Number(offsetArg.split("=")[1]) : 0;
-  const summaryForRun = limit
+  let summaryForRun = limit
     ? { ...summary, writeback_items: (summary.writeback_items || []).slice(offset, offset + limit) }
     : { ...summary, writeback_items: (summary.writeback_items || []).slice(offset) };
+
+  // Scan 文献池 for existing ABC items with empty shortTitle
+  const rootKey = summary?.pool_collection_key || summary?.root_collection?.key || "";
+  const writebackKeys = new Set((summaryForRun.writeback_items || []).map((it) => it.itemKey).filter(Boolean));
+  const poolScan = rootKey
+    ? await collectExistingItemsMissingShortTitle(rootKey, writebackKeys, { now: TODAY, windowDays: Math.max(1, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_WINDOW_DAYS || 2)), idBase: 1100000 })
+    : { candidates: [], scanStats: { date_collections_scanned: 0, items_scanned: 0, items_missing_shorttitle: 0, errors: 0 } };
+
+  if (poolScan.candidates.length > 0) {
+    const poolScanLimit = Math.max(1, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_LIMIT || 50));
+    const limited = poolScan.candidates.slice(0, poolScanLimit);
+    const merged = [...summaryForRun.writeback_items, ...limited.map((c) => ({ ...c, backfill_short_title: true }))];
+    summaryForRun = { ...summaryForRun, writeback_items: merged };
+    console.error(`[translation_backfill] pool scan: ${poolScan.scanStats.items_missing_shorttitle} missing shortTitle, ${limited.length} added (limit=${poolScanLimit})`);
+  }
+
   const translationConfig = getTranslationConfig();
   const concurrencyRaw = process.env.ZOTERO_TRANSLATION_BACKFILL_CONCURRENCY;
   const configuredConcurrency = Number(concurrencyRaw || 10);
@@ -152,6 +240,35 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
     ...(autoDowngrade || { backfill_auto_downgrade_triggered: false }),
     ...report,
   };
+
+  // Diagnostic signals: distinguish no-candidates vs missing API key
+  const writebackItemCount = (summary?.writeback_items || []).length;
+  const poolDuplicates = Number(summary?.counters?.skipped_duplicate_in_pool || 0);
+  const writebackFailures = Array.isArray(summary?.failures) ? summary.failures.length : 0;
+  output.diagnostic_signals = {
+    translation_skipped_no_candidates: report.total === 0,
+    translation_disabled_missing_api_key: !translationConfig.apiKeyConfigured,
+    writeback_items_in: writebackItemCount,
+    writeback_pool_duplicates: poolDuplicates,
+    writeback_failures: writebackFailures,
+    pool_scan_enabled: Boolean(rootKey),
+    pool_scan_date_collections: poolScan.scanStats.date_collections_scanned,
+    pool_scan_items_scanned: poolScan.scanStats.items_scanned,
+    pool_scan_items_missing_shorttitle: poolScan.scanStats.items_missing_shorttitle,
+    pool_scan_errors: poolScan.scanStats.errors,
+    candidates_from_writeback: writebackItemCount,
+    candidates_from_pool_scan: poolScan.candidates.length,
+    pool_scan_limit: Math.max(1, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_LIMIT || 50)),
+  };
+  if (report.total === 0 && !translationConfig.apiKeyConfigured) {
+    console.error("[translation_backfill] skipped: no candidate items AND missing TITLE_TRANSLATION_API_KEY");
+  } else if (report.total === 0) {
+    console.error(`[translation_backfill] skipped: no candidate items (writeback=${writebackItemCount}, pool_scan_missing=${poolScan.scanStats.items_missing_shorttitle}, duplicates=${poolDuplicates}, failures=${writebackFailures})`);
+  } else if (!translationConfig.apiKeyConfigured) {
+    console.error("[translation_backfill] disabled: missing TITLE_TRANSLATION_API_KEY (items available but API key not set)");
+  } else {
+    console.error(`[translation_backfill] processing ${report.total} items (writeback=${writebackItemCount}, pool_scan=${poolScan.candidates.length})`);
+  }
   const usage = report.usage || {};
   const usageReport = {
     date: dateStr,
@@ -212,6 +329,7 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
       failed_samples: report.failures.slice(0, 5),
       api_key_configured: translationConfig.apiKeyConfigured,
       usage_report_path: usagePath,
+      diagnostic_signals: output.diagnostic_signals,
     };
     await fs.writeFile(runReportPath, JSON.stringify(runReport, null, 2), "utf8");
   } catch {}

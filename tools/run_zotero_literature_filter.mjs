@@ -1,3 +1,6 @@
+// Must be first import: sets RESEARCH_OS_OVERRIDE_DATE from --date= CLI arg before stage modules load.
+import "./lib/date_override_bootstrap.mjs";
+
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -194,6 +197,12 @@ async function evaluateOrchestratorIntervalGate(config, clock, readJson, { trigg
     : null;
 }
 
+export function parseStage1Only(env = process.env, argv = process.argv) {
+  const flag = (argv || []).includes("--stage1-only");
+  const fromEnv = /^(1|true|yes)$/i.test(String(env.RESEARCH_OS_STAGE1_ONLY || "").trim());
+  return flag || fromEnv;
+}
+
 export function detectRunMode(env = process.env, argv = process.argv) {
   const triggerMode = parseTriggerMode(env, argv);
   const manualTrigger = isManualTrigger(triggerMode);
@@ -215,6 +224,7 @@ export async function runZoteroLiteratureFilter({
   triggerMode = parseTriggerMode(),
   runMode = detectRunMode(),
   clock = () => new Date(),
+  stage1Only = parseStage1Only(),
 } = {}) {
   const runId = `zlf-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const startedAt = iso(clock());
@@ -260,18 +270,47 @@ export async function runZoteroLiteratureFilter({
     stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, "interval_not_reached", () => new Date(startedAt)));
     await writeJson(`${config.pipelineDir}/run_skip_report.json`, skipReport);
     await writeJson(`${config.pipelineDir}/run_report.json`, skipReport);
-    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, startedAt, finishedAt: startedAt, status: "skipped", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts, skipReport };
+    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, platform: config.platform || process.platform, startedAt, finishedAt: startedAt, status: "skipped", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts, skipReport };
     await writeReport(report);
     return report;
   }
 
   stages.push(await executeStage(stageDefs.stage1, runSameProcessStage, clock));
+  if (stage1Only && stages.at(-1).exitCode === 0) {
+    stages.push(skippedStage(stageDefs.mcpReady.name, stageDefs.mcpReady.scriptPath, "stage1_only_mode", clock));
+    stages.push(skippedStage(stageDefs.stage2.name, stageDefs.stage2.scriptPath, "stage1_only_mode", clock));
+    stages.push(skippedStage(stageDefs.stage3.name, stageDefs.stage3.scriptPath, "stage1_only_mode", clock));
+    stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, "stage1_only_mode", clock));
+    const explicitForceRun = runMode.explicitForceRun;
+    const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun);
+    const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null;
+    const report = {
+      automationName: AUTOMATION_NAME,
+      runId,
+      platform: config.platform || process.platform,
+      startedAt,
+      finishedAt: iso(clock()),
+      status: "completed_stage1_only",
+      stage1Only: true,
+      triggerMode,
+      runMode,
+      forceRun: manualTrigger || explicitForceRun,
+      explicitForceRun,
+      bypassIntervalGate,
+      bypassReason,
+      pipelineDir: config.pipelineDir,
+      stages,
+      artifacts,
+    };
+    await writeReport(report);
+    return report;
+  }
   if (stages.at(-1).exitCode !== 0) {
     stages.push(skippedStage(stageDefs.mcpReady.name, stageDefs.mcpReady.scriptPath, "stage1_failed", clock));
     stages.push(skippedStage(stageDefs.stage2.name, stageDefs.stage2.scriptPath, "stage1_failed", clock));
     stages.push(skippedStage(stageDefs.stage3.name, stageDefs.stage3.scriptPath, "stage1_failed", clock));
     stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, "stage1_failed", clock));
-    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, startedAt, finishedAt: iso(clock()), status: "failed", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
+    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, platform: config.platform || process.platform, startedAt, finishedAt: iso(clock()), status: "failed", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
     await writeReport(report);
     return report;
   }
@@ -281,9 +320,9 @@ export async function runZoteroLiteratureFilter({
     stages.push(skippedStage(stageDefs.stage2.name, stageDefs.stage2.scriptPath, "mcp_ready_failed", clock));
     stages.push(skippedStage(stageDefs.stage3.name, stageDefs.stage3.scriptPath, "mcp_ready_failed", clock));
     stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, "mcp_ready_failed", clock));
-    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, startedAt, finishedAt: iso(clock()), status: "failed", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
-    await writeReport(report);
-    return report;
+    const stage1Ok = stages.find((s) => s.name === "stage1")?.exitCode === 0;
+    const mcpNotReadyStatus = stage1Ok ? "degraded_due_to_mcp_unavailable" : "failed";
+    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, platform: config.platform || process.platform, startedAt, finishedAt: iso(clock()), status: mcpNotReadyStatus, triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts }; await writeReport(report); return report;
   }
 
   const stage2 = await executeStage(stageDefs.stage2, runSameProcessStage, clock);
@@ -293,9 +332,29 @@ export async function runZoteroLiteratureFilter({
     const reason = stage2.exitCode !== 0 ? "stage2_failed" : "writeback_summary_stale_or_missing";
     stages.push(skippedStage(stageDefs.stage3.name, stageDefs.stage3.scriptPath, reason, clock));
     stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, reason, clock));
-    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, startedAt, finishedAt: iso(clock()), status: "failed", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
+    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, platform: config.platform || process.platform, startedAt, finishedAt: iso(clock()), status: "failed", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
     await writeReport(report);
     return report;
+  }
+
+  // Update desktop_daily_review_source.json writeback status without narrowing export candidates
+  try {
+    const desktopSrcPath = `${config.pipelineDir}/desktop_daily_review_source.json`;
+    const desktopSrc = await readJson(desktopSrcPath);
+    if (desktopSrc && Array.isArray(desktopSrc.triaged)) {
+      const writtenKeys = new Set((artifacts.writeback_summary.data?.writeback_items || []).map((it) => it.itemKey).filter(Boolean));
+      if (writtenKeys.size > 0) {
+        desktopSrc.triaged = desktopSrc.triaged.map((it) => {
+          if (writtenKeys.has(it.itemKey)) {
+            return { ...it, 写回状态: "已写回" };
+          }
+          return it;
+        });
+        await writeJson(desktopSrcPath, desktopSrc);
+      }
+    }
+  } catch (e) {
+    console.error(`[orchestrator] failed to annotate desktop source writeback status: ${String(e?.message || e).slice(0, 200)}`);
   }
 
   const stage3 = await executeStage(stageDefs.stage3, runSameProcessStage, clock);
@@ -309,14 +368,14 @@ export async function runZoteroLiteratureFilter({
   if ((stage3.exitCode !== 0 && stage3.exitCode !== 2) || !artifacts.translation_backfill.currentRun) {
     const reason = stage3.exitCode !== 0 && stage3.exitCode !== 2 ? "stage3_failed" : "translation_backfill_stale_or_missing";
     stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, reason, clock));
-    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, startedAt, finishedAt: iso(clock()), status: "failed", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
+    const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, platform: config.platform || process.platform, startedAt, finishedAt: iso(clock()), status: "failed", triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
     await writeReport(report);
     return report;
   }
 
   stages.push(await executeStage(stageDefs.stage4, runSameProcessStage, clock));
   const status = stages.at(-1).exitCode === 0 ? "completed" : "failed";
-  const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, startedAt, finishedAt: iso(clock()), status, triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
+  const explicitForceRun = runMode.explicitForceRun; const bypassIntervalGate = Boolean(manualTrigger || explicitForceRun); const bypassReason = explicitForceRun ? EXPLICIT_FORCE_BYPASS_REASON : manualTrigger ? MANUAL_BYPASS_REASON : null; const report = { automationName: AUTOMATION_NAME, runId, platform: config.platform || process.platform, startedAt, finishedAt: iso(clock()), status, triggerMode, runMode, forceRun: manualTrigger || explicitForceRun, explicitForceRun, bypassIntervalGate, bypassReason, pipelineDir: config.pipelineDir, stages, artifacts };
   await writeReport(report);
   return report;
 }
@@ -328,9 +387,16 @@ async function main() {
     process.env.RESEARCH_OS_FORCE_RUN = "true";
     process.env.FORCE_RESEARCH_OS_RUN = "true";
   }
-  const report = await runZoteroLiteratureFilter({ triggerMode: runMode.triggerMode, runMode });
+  const dateArg = (process.argv || []).find((x) => x.startsWith("--date="));
+  const overrideDateStr = dateArg ? dateArg.split("=")[1] : undefined;
+  if (overrideDateStr) {
+    process.env.RESEARCH_OS_OVERRIDE_DATE = overrideDateStr;
+  }
+  const overrideNow = overrideDateStr ? new Date(overrideDateStr) : undefined;
+  const config = overrideNow ? buildRuntimeConfig({ now: overrideNow }) : buildRuntimeConfig();
+  const report = await runZoteroLiteratureFilter({ triggerMode: runMode.triggerMode, runMode, config });
   console.log(JSON.stringify(report, null, 2));
-  process.exit(["completed", "skipped"].includes(report.status) ? 0 : 1);
+  process.exit(["completed", "completed_stage1_only", "degraded_due_to_mcp_unavailable", "skipped"].includes(report.status) ? 0 : 1);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {

@@ -15,6 +15,8 @@ import {
 export const SCREENING_STANDARDS_FILE_NAME = "screening_standards.md";
 export const SCREENING_STANDARDS_DOCX_FILE_NAME = "screening_standards.docx";
 export const SCREENING_STANDARDS_LAST_SYNCED_FILE_NAME = ".screening_standards.last_synced.md";
+const SCREENING_STANDARDS_BACKUP_FILE_NAME = "screening_standards.backup.docx";
+
 export const SCREENING_STANDARDS_SOURCE_NAME = "screening_standards_md";
 
 export const INITIAL_SCREENING_STANDARDS_ZH = `# 文献筛选标准
@@ -25,56 +27,38 @@ export const INITIAL_SCREENING_STANDARDS_ZH = `# 文献筛选标准
 
 ## 优先关注
 
-* 优先关注动物实验，尤其是哺乳动物疾病模型（如小鼠、大鼠等）、体外实验、机制研究和基础机制研究场景。
-* 优先关注涉及神经生物学、神经炎症、小胶质细胞、神经元-胶质细胞相互作用、突触调控或相关神经系统通路的机制研究。
-* 优先关注多组学机制研究（如转录组学、蛋白质组学、代谢组学、单细胞组学、空间组学、整合组学分析），尤其是与疾病机制相关并有实验验证支持的研究。
-* 优先关注补体系统相关研究、补体激活通路、补体介导的神经炎症、免疫调控机制或神经免疫相互作用。
-* 优先关注肠道菌群或微生物组相关研究，尤其是涉及疾病机制、宿主-微生物相互作用、神经免疫调控、代谢、肠-脑轴、多组学整合或实验验证的研究。
-* 非哺乳动物模型中，斑马鱼研究优先级高于其他非哺乳动物模型。
-* 即使不属于神经领域，只要机制深度强、生物学信息量高或具有广泛可转化意义，也优先关注探索性或基础机制研究。
+* 优先关注与当前课题直接相关的机制研究、实验验证研究和高质量证据。
+* 优先关注多组学机制研究，尤其是与疾病机制相关并有实验验证支持的研究。
+* 请根据你的研究方向，在此添加具体的优先关注规则。
 
 ---
 
 ## 相对降权
 
-* 降权缺乏机制深度的人群队列研究、流行病学关联研究、大型观察性结局研究或纯临床结局导向研究。
-* 降权肾脏结局研究和以肾脏为中心的临床结局场景，除非其直接关联更广泛关注的机制问题。
-* 降权植物生物学、植物组学或植物机制研究，即使使用了多组学方法。
-* 降权斑马鱼以外的非哺乳动物研究（如果蝇、线虫、酵母、昆虫单一模型等），除非其机制洞见特别突出。
-* 降权缺乏机制洞见、细胞验证、动物建模或功能实验的纯描述性临床研究。
-* 降权缺乏功能验证或机制解释的大规模组学关联研究。
-* 降权没有可迁移机制相关性的非医学或无关疾病背景研究。
+* 降权缺乏机制深度的人群队列研究、流行病学关联研究或纯临床结局导向研究。
+* 降权缺乏机制洞见的纯描述性临床研究。
+* 请根据你的研究方向，在此添加具体的降权规则。
 
 ---
 
 ## 严格排除
 
-* 排除缺乏直接生物医学机制相关性的纯工程、计算工程、材料科学、物理学、电子、机械工程或无关技术/工业研究。
-* 排除没有实质性生物学或疾病机制洞见的纯方法学 AI、算法或工具开发论文。
-* 排除没有实验或机制性生物学相关性的非生物医学系统工程或理论建模研究。
+* 排除缺乏直接生物医学机制相关性的纯工程、材料科学或无关技术研究。
+* 排除没有实质性生物学洞见的纯方法学 AI 或工具开发论文。
+* 请根据你的研究方向，在此添加具体的排除规则。
 
 ---
 
 ## 不确定边界
 
-* 对缺乏机制验证的纯临床神经科学结局研究，目前反馈存在冲突；用于分级前需要继续细化边界。
-* 对缺乏功能验证的大规模组学关联研究，目前反馈存在冲突；用于分级前需要继续细化边界。
-* 对机制深度较强但不属于神经领域的研究，目前反馈存在冲突；用于分级前需要继续细化边界。
-* 对仅使用斑马鱼模型的机制研究，目前反馈存在冲突；用于分级前需要继续细化边界。
-* 对神经炎症语境之外的补体相关研究，目前反馈存在冲突；用于分级前需要继续细化边界。
-* 对缺乏机制或实验验证的微生物组关联研究，目前反馈存在冲突；用于分级前需要继续细化边界。
+* 对边界模糊的研究类型，记录反馈冲突并持续细化规则。
 
 ---
 
 ## 注意事项
 
-* 对人群队列或临床结局研究的降权仅适用于纯观察性或机制较弱的场景，不应泛化到整个主题。
-* 只有当组学分析提供有意义的机制洞见，而不只是描述性谱系分析时，才优先关注多组学研究。
-* 如果机制相关性强，神经或小胶质细胞研究可跨疾病领域广泛优先关注。
-* 只有当微生物组研究涉及生物学机制、宿主相互作用、免疫调控、代谢或实验验证时，才优先关注。
-* 对非哺乳动物模型的降权仅适用于机制相关性较弱的场景；机制洞见特别突出的研究仍可纳入。
-* 植物研究原则上广泛降权，不因使用组学方法而提高优先级，除非其直接关联保守的生物医学机制。
-* 工程导向研究只有在具有明确的生物医学机制可解释性或疾病相关性时才可避免严格排除。
+* 降权规则仅适用于机制较弱的场景，不应泛化到整个主题。
+* 请根据你的研究方向，在此添加具体注意事项。
 `;
 
 export function screeningStandardsPath(reviewRoot) {
@@ -95,8 +79,7 @@ export function screeningStandardsLastSyncedPath(reviewRoot) {
 
 async function backupDocx(docxPath) {
   if (!fs.existsSync(docxPath)) return null;
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-  const backupPath = docxPath.replace(/\.docx$/, `_backup_${timestamp}.docx`);
+  const backupPath = path.join(path.dirname(docxPath), SCREENING_STANDARDS_BACKUP_FILE_NAME);
   await fs.promises.copyFile(docxPath, backupPath);
   return backupPath;
 }
@@ -692,15 +675,17 @@ function buildDocxParts({ previousText, currentText, keywordGroups, evaluationTe
     { text: "" },
     ...String(evaluationText || "").split(/\r?\n/).map((line) => ({ text: line })).filter((part) => String(part.text || "").trim()),
   ];
+  parts.push({ text: "待确认规则建议 / Pending Rule Suggestions", style: "Heading1" });
   if (suggestions.length) {
-    parts.push({ text: "待确认规则建议 / Pending Rule Suggestions", style: "Heading1" });
     parts.push({ text: "状态选项 / Status options：pending/待定、accept/接受、reject/拒绝、revise/修改" });
     parts.push({ kind: "suggestions_table", rows: suggestions });
+  } else {
+    parts.push({ text: "本次暂无待确认规则建议 / No pending rule suggestions in this run" });
   }
   return parts;
 }
 
-export async function syncScreeningStandardsDocx(reviewRoot, { pubmedConfigPath = "", evaluationText = "", previousText = null, suggestions = [], suggestionsLogPath = null } = {}) {
+export async function syncScreeningStandardsDocx(reviewRoot, { pubmedConfigPath = "", evaluationText = null, previousText = null, suggestions = [], suggestionsLogPath = null } = {}) {
   const current = await readScreeningStandardsFile(reviewRoot);
   const snapshotPath = screeningStandardsLastSyncedPath(reviewRoot);
   const docxPath = screeningStandardsDocxPath(reviewRoot);
@@ -723,20 +708,44 @@ export async function syncScreeningStandardsDocx(reviewRoot, { pubmedConfigPath 
     } catch {}
   }
 
-  // Fallback: if evaluationText is empty, read from existing docx
-  if (!evaluationText && fs.existsSync(docxPath)) {
+  // Fallback: only read evaluationText from existing docx when not explicitly provided (null).
+  // Empty string ("") means "clear evaluation"; null means "not specified, preserve existing".
+  if (evaluationText == null && fs.existsSync(docxPath)) {
     try {
       const existingParsed2 = await parseScreeningStandardsDocx(docxPath);
       if (existingParsed2.evaluation_text) evaluationText = existingParsed2.evaluation_text;
     } catch {}
   }
 
-  // Load suggestions from log if not explicitly provided
+  // Load suggestions from log if not explicitly provided; only include unresolved pending items
   let allSuggestions = suggestions;
   if (!allSuggestions.length && suggestionsLogPath) {
     try {
       const log = JSON.parse(await fs.promises.readFile(suggestionsLogPath, "utf8"));
-      allSuggestions = (log.suggestions || []).filter((s) => s.status === "pending" || s.processed_at);
+      allSuggestions = (log.suggestions || []).filter((s) => s.status === "pending" && !s.processed_at);
+    } catch {}
+  }
+  // Fallback: preserve pending suggestions from existing docx when no other source
+  if (!allSuggestions.length && !suggestionsLogPath && fs.existsSync(docxPath)) {
+    try {
+      const existingForSuggestions = await parseScreeningStandardsDocx(docxPath);
+      const table = existingForSuggestions.suggestions_table || [];
+      if (table.length > 1) {
+        const hdrs = table[0].map((c) => String(c || "").trim());
+        const statusIdx = hdrs.indexOf("状态");
+        const pendingRows = table.slice(1).filter((row) => {
+          const s = statusIdx >= 0 ? String(row[statusIdx] || "").trim().toLowerCase() : "";
+          return s === "pending" || s === "待定";
+        });
+        if (pendingRows.length) {
+          allSuggestions = pendingRows.map((row) => {
+            const obj = {};
+            hdrs.forEach((h, i) => { if (h) obj[h] = row[i] || ""; });
+            obj.status = "pending";
+            return obj;
+          });
+        }
+      }
     } catch {}
   }
 
@@ -753,7 +762,7 @@ export async function syncScreeningStandardsDocx(reviewRoot, { pubmedConfigPath 
       if (rulesText) {
         for (const line of rulesText.split(/\r?\n/)) {
           const trimmed = line.trim();
-          if (trimmed && !mdText.includes(trimmed.toLowerCase())) {
+          if (trimmed && !mdText.includes(trimmed.toLowerCase()) && !isManagedTemplateText(trimmed)) {
             unknownBlocks.push(`<w:p><w:r><w:t xml:space="preserve">${escapeXml(trimmed)}</w:t></w:r></w:p>`);
           }
         }
@@ -869,8 +878,41 @@ function parseKeywordTable(rows = []) {
   return out;
 }
 
-const KNOWN_SECTIONS = new Set(["偏好规则", "格式说明 / Format Notes", "格式说明", "检索关键词", "评价", "待确认规则建议", "待确认规则建议 / Pending Rule Suggestions"]);
+const KNOWN_SECTIONS = new Set(["偏好规则", "格式说明 / Format Notes", "格式说明", "检索关键词", "评价", "待确认规则建议", "待确认规则建议 / Pending Rule Suggestions", "用户保留内容", "用户保留内容 / Preserved User Content"]);
 const GUIDE_TEXT_PREFIX = "对偏好学习的意见";
+
+// Template/system text patterns that must not be preserved as user content
+const MANAGED_CONTENT_MARKERS = [
+  "用户保留内容 / Preserved User Content",
+  "以下内容来自上一次 docx 中系统未识别的区域",
+  "状态选项 / Status options",
+  "格式说明 / Format Notes",
+  "待确认规则建议 / Pending Rule Suggestions",
+  "本次暂无待确认规则建议",
+  "No pending rule suggestions",
+  "对偏好学习的意见可写在此处",
+  "黑体",
+  "红色",
+  "蓝色",
+  "删除线",
+  "待确认建议是否生效",
+  "Word 下拉不可用时",
+  "pending/待定",
+  "accept/接受",
+  "reject/拒绝",
+  "revise/修改",
+  "Active rule unchanged",
+  "Newly added or revised",
+  "Removed or retired",
+  "Rule suggestions are applied",
+  "If Word dropdown is unavailable",
+];
+
+function isManagedTemplateText(text) {
+  const t = String(text || "").trim();
+  if (!t) return true;
+  return MANAGED_CONTENT_MARKERS.some((marker) => t.includes(marker));
+}
 
 export async function parseScreeningStandardsDocx(docxPath) {
   const entries = parseZipEntries(await fs.promises.readFile(docxPath));
@@ -900,11 +942,19 @@ export async function parseScreeningStandardsDocx(docxPath) {
     let captured = false;
     if (currentSection === "偏好规则" && text) { sectionLines["偏好规则"].push(text); captured = true; }
     if (currentSection === "检索关键词" && text.startsWith("PubMed query preview:")) { queryPreview = text.replace(/^PubMed query preview:\s*/, ""); captured = true; }
-    if (currentSection === "评价" && text && !text.startsWith(GUIDE_TEXT_PREFIX) && text !== "") { sectionLines["评价"].push(text); captured = true; }
+    if (currentSection === "评价" && text && !text.startsWith(GUIDE_TEXT_PREFIX)) { sectionLines["评价"].push(text); captured = true; }
     if (!captured && currentSection && !KNOWN_SECTIONS.has(currentSection)) unknownBlocks.push(block);
     if (!captured && !currentSection) unknownBlocks.push(block);
     if (!captured && KNOWN_SECTIONS.has(currentSection) && text) unknownBlocks.push(block);
   }
+  // Filter out managed template/system blocks from unknown blocks to prevent recursive pollution
+  const filteredUnknownBlocks = unknownBlocks.filter((block) => {
+    const textMatch = block.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g);
+    if (!textMatch) return true;
+    const text = textMatch.map((m) => m.replace(/<[^>]+>/g, "")).join("");
+    return !isManagedTemplateText(text);
+  });
+
   return {
     section_names: sectionNames,
     rules_text: sectionLines["偏好规则"].join("\n"),
@@ -913,8 +963,8 @@ export async function parseScreeningStandardsDocx(docxPath) {
     query_preview: queryPreview,
     evaluation_text: sectionLines["评价"].join("\n").trim(),
     suggestions_table: suggestionsTable,
-    unknown_blocks: unknownBlocks,
-    unknown_block_count: unknownBlocks.length,
+    unknown_blocks: filteredUnknownBlocks,
+    unknown_block_count: filteredUnknownBlocks.length,
   };
 }
 
@@ -1144,11 +1194,11 @@ export async function applyScreeningStandardsLearningUpdate(reviewRoot, audit = 
   if (content !== current.content) {
     await fs.promises.writeFile(current.path, content, "utf8");
   }
-  let evaluationText = "";
+  let evaluationText = null;
   const docxPath = screeningStandardsDocxPath(reviewRoot);
   try {
     if (fs.existsSync(docxPath)) {
-      evaluationText = (await parseScreeningStandardsDocx(docxPath)).evaluation_text || "";
+      evaluationText = (await parseScreeningStandardsDocx(docxPath)).evaluation_text || null;
     }
   } catch {}
   const docxSync = await syncScreeningStandardsDocx(reviewRoot, { evaluationText, suggestionsLogPath });

@@ -32,6 +32,7 @@ Cadence defaults:
 - Synthesis interval: 14 days (`RESEARCH_OS_SYNTHESIS_INTERVAL_DAYS=14`)
 - Synthesis label: `双周报`
 - If interval not reached and no force flag: skip full stages and emit skip report fields (`skipped_due_to_interval`, `next_eligible_run_at`)
+- Interval gate uses `Asia/Shanghai` 15:00 planned slot semantics; the 48h comparison is based on planned slots, not actual start/end/Stage4 times.
 
 ## Capability Delegation and Existing Tool Boundary
 
@@ -67,6 +68,14 @@ Cadence defaults:
   - keep module responsibilities clear
   - lower maintenance and debugging costs
 
+## Reproducibility baseline (added)
+
+- Required runtime: **Node.js >= 18.0.0** and **PowerShell 7 (pwsh) >= 7.0.0**.
+- This repository currently has **no committed `package.json` and no npm/pnpm/yarn lockfile**.
+- Local commands run directly with the Node binary, for example `node tools/run_zotero_literature_filter.mjs` or `node --test tests/*.test.mjs`.
+- If local tests are runnable, the narrow default verification command is `node --test tests/*.test.mjs`.
+- Because no package manager metadata is committed, reproducibility currently depends on the documented runtime versions, `.env.example`, and local Node-built-in test execution only.
+
 ## Hard Constraints
 
 - PowerShell gate requires `pwsh >= 7.0.0` (exact pinning like `7.6.1` is not allowed unless explicitly required by a future task).
@@ -81,6 +90,7 @@ Cadence defaults:
 - The default translation model lives in `config/title_translation.config.json`, and `TITLE_TRANSLATION_MODEL` can override it.
 - The title translation prompt lives in `prompts/title_translation.md` and uses `${sourceText}` substitution.
 - Default translation rate limits are RPM `100` and TPM `10,000,000`.
+- Title translation non-stream request bodies currently use `max_tokens`; if a real provider/model/key is not configured in the active environment, verification must stay mock/local, and end-to-end success must not be claimed.
 - Never write title translation secrets into config files, prompts, memory, reports, stdout, or stderr.
 
 ## Directory Model
@@ -97,7 +107,7 @@ Cadence defaults:
 - Dry-run/apply manifests: `research_os/run_manifests`
 
 Final workbook exports (desktop week folder):
-- `双周报.xlsx`
+- `双周报-*.docx`
 
 Final workbook exports (day folder):
 - `隔日报.xlsx`
@@ -115,7 +125,7 @@ Pipeline artifacts kept in `research_os/.../pipeline`:
 
 Repository automation entrypoint:
 
-- Use `node tools/run_zotero_literature_filter.mjs` as the single repository entrypoint for the full workflow.
+- Use `node --env-file=.env tools/run_zotero_literature_filter.mjs` as the single repository entrypoint for the full workflow.
 - The entrypoint writes `pipeline/orchestrator_report.json` and controls Stage 1 -> MCP readiness -> Stage 2 -> Stage 3 -> Stage 4 ordering in code without spawning Node child processes for stage scripts.
 - Do not rely on an agent manually stitching the stage scripts together during normal automation runs.
 
@@ -207,7 +217,30 @@ Internal stage order:
 7. A/B/C/D triage:
    - `隔日报.xlsx` excludes `D无关`
    - `triaged_items.json` and `run_report.json` retain `D无关` for audit
+   - **隔日报数据源规则**：`desktop_daily_review_source.json` 必须只包含当天 Stage2 实际写入 Zotero 的条目（来自 `mcp_writeback_summary.writeback_items`），不得包含文献池去重跳过的重复条目。Stage1 全量 ABC 是候选池，不是隔日报数据源。
+     - Stage 2 完成后，orchestrator 用 writeback itemKey 过滤 desktop source
+     - Stage 2 失败/skip 时，desktop source 保持原始全量（保证有输出）
+   - **隔日报两 sheet 互不重叠**：
+     - "需人工复核"：仅 `needs_human_review=true` 的条目
+     - "每日反馈"：当天写入的剩余 ABC 条目（排除已进入复核的）
+     - 两个 sheet 合计 = 当天实际写入 Zotero 的全部 ABC 条目
+   - 翻译补翻（pool scan）只静默补翻译，不混入隔日报数据源
+   - `隔日报.xlsx` "每日反馈" sheet uses three grade columns: 规则等级, 语义等级, 最终等级
+     - 规则等级: rule system initial grade
+     - 语义等级: semantic review suggested grade
+     - 最终等级: system-adopted final grade
+     - All three columns output only grade letters (A/B/C/D), no explanatory text like "C领域相关"
+   - `隔日报.xlsx` "需人工复核" sheet only contains items where `needs_human_review=true` (e.g. C→D blocked by policy)
+     - Auto-adopted adjustments (B→A, C→B, B→C) are visible in 每日反馈 via 规则等级/语义等级/最终等级 columns but do NOT enter 人工复核
+     - Users fill "人工确认等级" column; rule/semantic grades are read-only evidence
+     - Only one review sheet; no separate "语义捞回" or "语义降权提醒" sheets
+   - `隔日报.xlsx` "反馈" column (renamed from `feedback`) and "评价" column (renamed from `comment`)
+   - Removed columns: 来源等级, 已处理时间, 处理状态, 备注
+   - "期刊/来源" column should be cleaned to pure journal name (remove RSS/feed/platform suffixes)
 8. Zotero writeback and translation backfill
+   - Pool scan window defaults to 2 days (`ZOTERO_TRANSLATION_POOL_SCAN_WINDOW_DAYS`), covering only today and the previous run
+   - Legacy items in 文献池 are not re-scanned; only recent date subcollections are checked for missing shortTitle
+   - Pool scan limit defaults to 50 candidates (`ZOTERO_TRANSLATION_POOL_SCAN_LIMIT`)
 9. Update weekly and root assets (final xlsx export only after Stage2/Stage3 success)
 10. Zotero collection placement:
    - root collection: `文献池`
@@ -217,10 +250,12 @@ Internal stage order:
    - do not place items directly in root `文献池`
    - do not place items directly in date collection itself
    - dedup policy before writeback:
-     - read/build root pool (`文献池`) duplicate index first
-     - if duplicate in pool: skip create and skip all add-to-collection operations for current-day routing
+     - read/build duplicate indexes for `文献池`, `文献池/待删除`, and `值得精读`
+     - exact normalized match priority: `DOI > PMID > PMCID > arXiv > exact normalized title`
+     - title normalization must cover Unicode/punctuation/spacing variants (NFKC/NFKD, quote/dash unification, fullwidth mapping, combining-mark removal, control/zero-width cleanup)
+     - if duplicate in any of those collections: skip create and skip all add-to-collection operations for current-day routing
      - if not duplicate: add to root pool first, then add to daily source/grade collections
-     - record `skipped_duplicate_in_pool` and created/add counters in writeback summary
+     - record `skipped_duplicate_in_pool`, `skipped_duplicate_in_trash`, `skipped_duplicate_in_worthy`, and created/add counters in writeback summary
 11. Historical collection modification:
    - forbidden during ordinary Stage 1-4 writeback unless an explicit feedback-correction command is requested
    - explicit correction command: `node tools/zotero_feedback_collection_corrections.mjs`
@@ -230,11 +265,25 @@ Internal stage order:
    - `drop` correction target is `文献池/待删除`: add the item there, then remove it from the original day grade collection; do not delete the Zotero item automatically unless a separate explicit delete mode is requested and verified
    - `keep` is no-op; `upgrade`/`downgrade` add to target grade collection and remove from original grade collection
    - all correction runs must emit `research_os/run_manifests` JSON/CSV audit files with status counts and safety flags
+12. Star migration (rated items → `值得精读`):
+   - enabled by default; controlled by `ZOTERO_STAR_MIGRATION_MODE` (`expand` / `legacy` / `disabled`)
+   - window: `ZOTERO_STAR_MIGRATION_WINDOW_DAYS` (default `7`); threshold: `ZOTERO_STAR_MIGRATION_MIN_STARS` (default `4`)
+   - `expand` mode scans A + B + C grade collections; `legacy` mode scans A + B only
+   - migration target collection: `值得精读` (top-level, sibling of `文献池`)
+   - migration flow per eligible item:
+     1. add item to `值得精读`
+     2. remove item from date subcollections (source collections + grade collections)
+     3. remove item from root `文献池` — **mandatory** to keep root and date subcollections in sync
+   - if any removal step fails, log the error and continue with next item; do not abort the migration
+   - audit fields in `migration_stats`: `eligible_items`, `moved_to_worthy`, `already_in_worthy`, `removed_from_source_collections`, `removed_from_grade_collections`, `removed_from_root_pool`, `removal_failures`, `add_failures`
+   - invariant: after each run, every item in `值得精读` must NOT be in `文献池` root, and must NOT be in any date grade/source subcollection
+   - code location: `tools/mcp_bulk_writeback.mjs` → `migrateRatedItems` function
 
 ## Biweekly Review Checklist
 
-1. Verify trend quality in `双周报.xlsx`
-2. Verify machine audit JSON for unresolved items, contradiction evidence, and preference drift when needed
+1. Verify trend quality in the biweekly `双周报-*.docx` report.
+2. Verify machine audit JSON for unresolved items, contradiction evidence, and preference drift when needed.
+3. If historical run records are missing, the report should state “记录不足” rather than inventing data.
 
 ## One-off Historical Feedback Archive
 
@@ -256,7 +305,7 @@ Internal stage order:
 ## Global XLSX Export Policy
 
 - For all Research OS `.xlsx` outputs, default export path is `spreadsheets_skill` via the Codex `Spreadsheets` skill (or a unified spreadsheet adapter that calls the same runtime capability).
-- Scope is limited to final user-facing workbooks: `隔日报.xlsx` and `双周报.xlsx`.
+- Scope is limited to final user-facing outputs: `隔日报.xlsx` plus the biweekly `双周报-*.docx` report.
 - Export fallback order is fixed and auditable:
   1. `spreadsheets_skill`
   2. `node_fallback`
@@ -276,6 +325,11 @@ Internal stage order:
 - If `screening_standards.md` is missing, initialize it with the Chinese baseline standard and continue.
 - Before using the standards file, normalize previous display markup: red additions become plain text; blue strikethrough deletions are removed.
 - Daily standard changes are written back to clean `screening_standards.md`; `screening_standards.docx` is regenerated as the human revision display, with current additions in red and current deletions in blue strikethrough.
+- `screening_standards.docx` workspace conventions:
+  - The evaluation area ("评价") and "Pending Rule Suggestions" table are consumable workspaces; after processing, the evaluation area must be cleared and only unresolved pending suggestions may remain.
+  - Suggestions with status `accepted`/`rejected`/`revise` or with `processed_at` must not be written back into the next docx round.
+  - "Preserved User Content" is reserved for genuinely unclassifiable user-authored content only; it must not contain Format Notes, Status options, Pending Rule Suggestions, old evaluation text, old Preserved User Content blocks, or other system template content, to prevent recursive pollution.
+  - Auto-maintained docx must not generate unbounded timestamp backups by default; at most one fixed backup file (`screening_standards.backup.docx`) is kept, overwriting on each run. Historical timestamp backups are not currently maintained; if future audit needs arise, a separate opt-in mechanism may be implemented.
 - Every `隔日报.xlsx` export must include only the user-facing `每日反馈` sheet.
 - Detailed audit fields must stay in `preference_learning_audit.json` and `run_report.json`, not in `隔日报.xlsx`.
 - Missing `当前筛选标准摘要` is expected for new exports and must not block preference learning.
@@ -350,9 +404,70 @@ Internal stage order:
 - `5.1`, `6.x`, and all versions with major `<7` fail the minimum gate.
 - Unknown version output must be audited (`pwsh_version_unknown=true`, raw output captured) and must not be treated as automatic hard failure by itself.
 
+## Cross-Platform Principle
+
+**Different OS → different commands → same functional behavior.**
+
+The pipeline must produce identical outcomes on Windows and macOS: same Stage 1→2→3→4 flow, same artifacts, same report status values, same Zotero collection structure. The implementation uses platform-specific system commands for two operations only:
+
+| Operation | Windows | macOS | Linux |
+|---|---|---|---|
+| Launch Zotero | `powershell.exe Start-Process` / `schtasks` | `open -a Zotero` | `spawn(ZOTERO_EXE)` |
+| Detect Zotero process | `tasklist` + `Get-Process` via pwsh | `ps -A -o comm=` | `ps -A -o comm=` |
+
+Everything else (MCP probe, RSS fetch, PubMed query, triage, dedup, writeback, translation, export) is platform-independent Node.js code.
+
+The single functional gate for Stage 2/3 entry is: **MCP `get_collections` JSON-RPC probe succeeds**. This gate is identical on all platforms. Process existence is a diagnostic signal only, not a gate.
+
+## Cross-Platform Preflight Rules
+
+- `runtime_config.mjs` resolves `zoteroExe` per platform: darwin → `/Applications/Zotero.app/Contents/MacOS/zotero`, win32 → `D:/Zotero/zotero.exe`, linux → `zotero` (PATH). `ZOTERO_EXE` env override has highest priority on all platforms.
+- `ensure_zotero_mcp_ready.mjs` uses platform-aware process detection: win32 → `tasklist` + `powershell.exe`/`pwsh`, darwin/linux → `ps -A -o comm=` (macOS markers: `zotero`, `/contents/macos/zotero`).
+- Platform-aware launch: win32 → `powershell.exe Start-Process`, darwin → `open -a Zotero`, fallback → Node `spawn`.
+- `schtasks`/`powershell.exe`/`tasklist`/`cmd.exe`/`Start-Process` must only be called in win32 code paths.
+- macOS must use `open`/`ps` equivalents; never call Windows-only commands on darwin.
+- `ZOTERO_EXTERNAL_LAUNCHER=desktop_commander` is Windows-only. On macOS, do not set this value.
+- Process existence ≠ MCP ready. MCP readiness (`get_collections` JSON-RPC probe) is the only gate for Stage 2/3.
+
+## Stage Gate Status Values
+
+- `completed`: All stages passed.
+- `completed_stage1_only`: Explicit `--stage1-only` mode; no MCP/Zotero/Stage2/3/4 attempted.
+- `degraded_due_to_mcp_unavailable`: Stage 1 passed but MCP readiness failed; Stage 2/3/4 skipped with recorded reason.
+- `failed`: Stage 1 failed, or Stage 2/3/4 failed after MCP was ready.
+- `skipped`: Interval gate not reached; no stages executed.
+- `failed_due_to_config_or_dependency`: Config/dependency failure before any stage execution.
+
+## Stale Artifact Protection
+
+- `inspectArtifact` compares artifact `mtime` against `stageStartedAt`. If `mtime < stageStartedAt`, artifact is marked `stale: true, currentRun: false`.
+- Stale `mcp_writeback_summary.json` or `abc_translation_backfill.json` must not be treated as current-run success artifacts.
+- Orchestrator checks `artifacts.writeback_summary.currentRun` and `artifacts.translation_backfill.currentRun` before proceeding to next stage.
+- Each report includes `runId` for cross-run artifact correlation.
+
+## macOS Parity Test Commands
+
+```bash
+# Syntax check all key modules
+node --check tools/lib/ensure_zotero_mcp_ready.mjs
+node --check tools/lib/runtime_config.mjs
+node --check tools/check_zotero_mcp_ready.mjs
+node --check tools/run_zotero_literature_filter.mjs
+
+# Run macOS parity tests (mock-based, no real Zotero/MCP)
+node --test tests/macos_parity.test.mjs
+
+# Stage 1-only smoke test (no MCP needed)
+node --env-file=.env tools/run_zotero_literature_filter.mjs --stage1-only
+
+# MCP readiness probe
+node --env-file=.env tools/check_zotero_mcp_ready.mjs
+```
+
 ## MCP Preflight Contract
 
-- Before any four-stage Zotero workflow run, the Agent layer must first trigger Zotero GUI startup through Desktop Commander MCP using the currently exposed tool `mcp__desktop_commander__.start_process` with fixed command `schtasks /Run /TN StartZoteroForCodexOnly` (or `cmd /c schtasks /Run /TN StartZoteroForCodexOnly` when needed by tool shell semantics), wait 3000ms, then probe Zotero MCP readiness.
+- On Windows, before any four-stage Zotero workflow run, the Agent layer must first trigger Zotero GUI startup through Desktop Commander MCP using the currently exposed tool `mcp__desktop_commander__.start_process` with fixed command `schtasks /Run /TN StartZoteroForCodexOnly` (or `cmd /c schtasks /Run /TN StartZoteroForCodexOnly` when needed by tool shell semantics), wait 3000ms, then probe Zotero MCP readiness.
+- On macOS, the `desktop_commander` scheduled-task path is Windows-only and not applicable. Use platform-native local launch/detection (`open -a Zotero`, `pgrep/ps`) and the platform-aware default Zotero path instead, then probe Zotero MCP readiness before Stage 2/3.
 - Cron/local automation fallback: if a standalone scheduled automation does not expose Desktop Commander, it may run only the same fixed command `schtasks /Run /TN StartZoteroForCodexOnly` via local shell, then must still set `ZOTERO_EXTERNAL_LAUNCHER=desktop_commander` so Stage2/Stage3 helpers remain readiness-only.
 - Do not hardcode arbitrary `execute_command` launch paths for this workflow because tool exposure can differ by session.
 - Do not pass arbitrary user-provided command strings to Desktop Commander for Zotero startup; only the fixed scheduled-task command is allowed.
@@ -374,7 +489,7 @@ Internal stage order:
      - In standalone cron/local automation only, if Desktop Commander is not exposed, run the exact same `schtasks /Run /TN StartZoteroForCodexOnly` command via local shell.
   2. Wait 3000ms.
   3. Set `ZOTERO_EXTERNAL_LAUNCHER=desktop_commander`.
-  4. Run `node tools/run_zotero_literature_filter.mjs`.
+  4. Run `node --env-file=.env tools/run_zotero_literature_filter.mjs`.
 - `tools/run_zotero_literature_filter.mjs` performs Stage 1 first without requiring Zotero MCP readiness, then runs the MCP readiness check before Stage 2.
 - Only when MCP readiness passes may Stage 2/Stage 3 run; if not ready, the orchestrator skips Stage 2/Stage 3 and marks upstream failure for Stage 4.
 - Stage2/Stage3 preflight in `ZOTERO_EXTERNAL_LAUNCHER=desktop_commander` mode must be readiness-only; it must not attempt local `pwsh`, `tasklist`, `Get-Process`, `Start-Process`, or Node spawn fallback.
@@ -388,3 +503,30 @@ Internal stage order:
   - Stage2/Stage3 must stop with `MCP_NOT_READY_AFTER_EXTERNAL_LAUNCHER`
   - no writeback/backfill success claim is allowed
   - stale `mcp_writeback_summary.json` and `abc_translation_backfill.json` must not be treated as current-run success artifacts.
+
+## Ollama Preflight Contract
+
+- Before semantic grading, `run_research_os_pipeline.mjs` calls `ensureOllamaReady()` from `tools/lib/ensure_ollama_ready.mjs`.
+- `ensureOllamaReady` performs `GET {ollamaUrl}/api/tags` health check. If already reachable, returns immediately (`started_now: false`).
+- If not reachable, launches Ollama per platform:
+  - **Windows**: `powershell.exe Start-Process -WindowStyle Hidden ollama -ArgumentList "serve"`
+  - **macOS**: `open -a Ollama`
+- After launch, polls `/api/tags` up to 10 times at 3-second intervals.
+- Default Ollama URL: `http://127.0.0.1:11434`; override via `OLLAMA_HOST` env var.
+- Ollama startup failure (`OLLAMA_START_FAILED` / `OLLAMA_NOT_REACHABLE`) sets `semanticGradingReport.skipped_reason = "ollama_unavailable"` and skips semantic grading only. All other pipeline stages continue normally.
+- `check_ollama_ready.mjs` is a standalone CLI entry point for manual readiness checks.
+- Embedding model is not auto-pulled; if missing, report the gap and stop semantic grading.
+- CLI startup order when semantic grading is enabled:
+  1. Set `ZOTERO_SEMANTIC_PREFERENCE_ENABLED=true`.
+  2. Run `node --env-file=.env tools/run_zotero_literature_filter.mjs`.
+  3. Pipeline automatically starts Ollama if needed before semantic grading.
+
+## Semantic Review Eligibility
+
+- Semantic review (`rule_grade → semantic_grade → final_grade`) only processes **B** and **C** items.
+- **A** items are not reviewed (already highest grade, no upgrade path).
+- **D** items are not reviewed, including those with `flags.uncertain=true`.
+- The eligibility check is: `ruleGrade === "B" || ruleGrade === "C"`.
+- 隔日报 and human review still operate on all ABC items; D items are excluded from daily review as before.
+- C→D semantic downgrade does **not** auto-adopt: `final_grade` stays C, `needs_human_review=true`, `disagreement_type=semantic_downgrade_review`. Human must confirm or reject.
+- All other 1-level adjustments (C→B, B→A, B→C) auto-adopt. 2+ level differences keep `rule_grade` and flag `needs_human_review=true`.

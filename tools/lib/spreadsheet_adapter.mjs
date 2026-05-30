@@ -17,7 +17,9 @@ export const STANDARD_SUMMARY_FEEDBACK_OPTIONS = [
   "准确", "太宽泛", "太窄", "重点错了", "缺少重点", "过度排除", "排除不足", "需要更偏临床", "其他",
 ];
 
-export const DAILY_REVIEW_HEADERS = ["英文标题", "标题翻译", "推荐等级", "期刊/来源", "来源等级", "feedback", "comment", "已处理时间", "处理状态", "备注"];
+export const DAILY_REVIEW_HEADERS = ["英文标题", "标题翻译", "规则等级", "语义等级", "最终等级", "期刊/来源", "反馈", "评价"];
+
+export const HUMAN_REVIEW_HEADERS = ["标题", "标题翻译", "期刊/来源", "发表日期", "规则等级", "语义等级", "最终等级", "是否需人工复核", "分歧类型", "语义调整原因", "人工确认等级"];
 
 export async function detectSpreadsheetsSkillAvailability() {
   try {
@@ -42,26 +44,137 @@ function createWorkbookWithSheet(Workbook, name) {
   return { wb, ws };
 }
 
+/**
+ * Extract a grade letter (A/B/C/D) from an item, trying multiple field names.
+ */
+function extractGradeLetter(item, keys) {
+  for (const k of keys) {
+    const raw = String(item?.[k] || "").trim();
+    if (!raw) continue;
+    const m = raw.match(/^[ABCD]/i);
+    if (m) return m[0].toUpperCase();
+  }
+  return "";
+}
+
+/**
+ * Clean journal/source name by removing common RSS/feed noise.
+ */
+function cleanJournalSource(item) {
+  const raw = String(
+    item?.journal || item?.publicationTitle || item?.["container-title"] ||
+    item?.source || item?.source_title || item?.source_platform || ""
+  ).trim();
+  if (!raw) return "";
+  let cleaned = raw
+    .replace(/:\s*Latest Articles\s*\(.*?\)\s*$/i, "")
+    .replace(/:\s*Latest Articles\s*$/i, "")
+    .replace(/:\s*Table of Contents\s*$/i, "")
+    .replace(/\s*[-–—]\s*Wiley Online Library\s*$/i, "")
+    .replace(/\s*[-–—]\s*Wiley\s*$/i, "")
+    .replace(/^ScienceDirect Publication:\s*/i, "")
+    .trim();
+  const noise = new Set(["Latest Results", "Wiley", "Wiley Online Library", "ScienceDirect", "ACS Publications"]);
+  if (noise.has(cleaned)) return "";
+  return cleaned;
+}
+
 function toDailyRows(triaged) {
   const banned = new Set(["D", "D无关"]);
   return triaged
-    .filter((it) => !banned.has(String(it?.grade || "")) && !banned.has(String(it?.["推荐等级"] || "")))
+    .filter((it) => {
+      const finalGrade = extractGradeLetter(it, ["final_grade", "finalGrade", "adjusted_grade", "grade"]) ||
+        extractGradeLetter(it, ["rule_grade", "ruleGrade", "original_grade", "initial_grade"]);
+      const label = String(it?.["推荐等级"] || "");
+      const needsReview = Boolean(
+        it?.needs_human_review || it?.needsHumanReview ||
+        it?.semantic_review?.needs_human_review
+      );
+      return !banned.has(finalGrade) && !banned.has(label) && !banned.has(String(it?.grade || "")) && !needsReview;
+    })
     .map((it) => {
       const translated = it?.["标题翻译"] || it?.["中文标题"] || it?.shortTitle || it?.title || "";
-      const source = String(it?.journal || it?.source_platform || "").replace("ScienceDirect Publication:", "").trim();
+      const ruleGrade = extractGradeLetter(it, ["rule_grade", "ruleGrade", "original_grade", "initial_grade", "grade"]);
+      const semanticGrade = extractGradeLetter(it, ["semantic_grade", "semanticGrade", "semantic_review.grade", "semanticPreference.grade"]);
+      const finalGrade = extractGradeLetter(it, ["final_grade", "finalGrade", "adjusted_grade", "grade"]);
+      const source = cleanJournalSource(it);
       return [
         it?.title || "",
         translated,
-        it?.["推荐等级"] || it?.grade_label || "",
+        ruleGrade,
+        semanticGrade,
+        finalGrade,
         source,
-        "abstract_only",
         "",
-        "",
-        "",
-        "待反馈",
         "",
       ];
     });
+}
+
+/**
+ * Grade ordering: A > B > C > D
+ */
+const GRADE_ORDER = { A: 0, B: 1, C: 2, D: 3 };
+
+/**
+ * Build rows for the "需人工复核" sheet from triaged items.
+ * Only includes items explicitly flagged with needs_human_review (e.g. C→D auto-blocked).
+ * Auto-adopted adjustments (B→A, C→B, B→C) are visible in 每日反馈 but do NOT enter this sheet.
+ */
+function toHumanReviewRows(triaged) {
+  const rows = [];
+  for (const it of triaged) {
+    const ruleGrade = extractGradeLetter(it, ["rule_grade", "ruleGrade", "original_grade", "initial_grade", "grade"]);
+    const semanticGrade = extractGradeLetter(it, ["semantic_grade", "semanticGrade", "semantic_review.grade", "semanticPreference.grade"]);
+    const finalGrade = extractGradeLetter(it, ["final_grade", "finalGrade", "adjusted_grade", "grade"]);
+
+    const hasFlag = Boolean(
+      it?.needs_human_review || it?.needsHumanReview ||
+      it?.semantic_review?.needs_human_review ||
+      it?.semantic_mismatch || it?.semantic_rescue
+    );
+
+    // Determine if review is needed — only explicit flag, not mere grade difference
+    const needsReview = hasFlag;
+
+    if (!needsReview) continue;
+
+    // Divergence type (for display only)
+    const gradesDiffer = ruleGrade && semanticGrade && ruleGrade !== semanticGrade;
+
+    // Determine divergence type
+    let divergenceType = "";
+    if (gradesDiffer) {
+      const ro = GRADE_ORDER[ruleGrade] ?? 99;
+      const so = GRADE_ORDER[semanticGrade] ?? 99;
+      divergenceType = so < ro ? "语义上调" : so > ro ? "语义降权提醒" : "";
+    }
+
+    // Semantic reason
+    const semanticReason = String(
+      it?.semantic_reason || it?.semanticReason ||
+      it?.semantic_review?.reason || it?.semantic_adjustment_reason || ""
+    ).trim();
+
+    const translated = it?.["标题翻译"] || it?.["中文标题"] || it?.shortTitle || it?.title || "";
+    const source = cleanJournalSource(it);
+    const pubDate = it?.date || it?.publicationDate || it?.publication_date || "-";
+
+    rows.push([
+      it?.title || "",
+      translated,
+      source,
+      pubDate,
+      ruleGrade,
+      semanticGrade,
+      finalGrade,
+      "是",
+      divergenceType,
+      semanticReason,
+      "", // 人工确认等级 — left empty for user
+    ]);
+  }
+  return rows;
 }
 
 function writeHeader(sheet, range, headers) {
@@ -147,35 +260,47 @@ export async function exportAllResearchOsXlsxWithSpreadsheetsSkill({
   const dailyRows = toDailyRows(triaged);
   const exportPaths = {
     every_other_day_report: path.join(reviewDayDir, "隔日报.xlsx"),
-    biweekly_report: path.join(reviewWeekDir, "双周报.xlsx"),
   };
 
   const { wb: daily, ws: dailySheet } = createWorkbookWithSheet(Workbook, "每日反馈");
   const allDaily = [DAILY_REVIEW_HEADERS, ...dailyRows];
-  dailySheet.getRange(`A1:J${allDaily.length}`).values = allDaily;
-  writeHeader(dailySheet, "A1:J1", DAILY_REVIEW_HEADERS);
+  const colCount = DAILY_REVIEW_HEADERS.length;
+  const lastCol = String.fromCharCode(64 + colCount);
+  dailySheet.getRange(`A1:${lastCol}${allDaily.length}`).values = allDaily;
+  writeHeader(dailySheet, "A1:" + lastCol + "1", DAILY_REVIEW_HEADERS);
   dailySheet.freezePanes.freezeRows(1);
   const maxRow = Math.max(allDaily.length, 2);
-  dailySheet.getRange(`C2:C${maxRow}`).dataValidation = { rule: { type: "list", values: ["A课题相关", "B专题相关", "C领域相关", "D无关"] } };
-  dailySheet.getRange(`E2:E${maxRow}`).dataValidation = { rule: { type: "list", values: ["metadata_only", "abstract_only", "pdf_fulltext"] } };
-  dailySheet.getRange(`F2:F${maxRow}`).dataValidation = { rule: { type: "list", values: ["keep", "drop", "upgrade", "downgrade"] } };
-  dailySheet.getRange(`I2:I${maxRow}`).dataValidation = { rule: { type: "list", values: ["待反馈", "已学习", "跳过", "需复核"] } };
+  // C=规则等级, D=语义等级, E=最终等级 → A/B/C/D dropdown
+  dailySheet.getRange(`C2:C${maxRow}`).dataValidation = { rule: { type: "list", values: ["A", "B", "C", "D"] } };
+  dailySheet.getRange(`D2:D${maxRow}`).dataValidation = { rule: { type: "list", values: ["A", "B", "C", "D"] } };
+  dailySheet.getRange(`E2:E${maxRow}`).dataValidation = { rule: { type: "list", values: ["A", "B", "C", "D"] } };
+  // G=反馈 → keep/drop/upgrade/downgrade
+  dailySheet.getRange(`G2:G${maxRow}`).dataValidation = { rule: { type: "list", values: ["keep", "drop", "upgrade", "downgrade"] } };
+
+  // Add "需人工复核" sheet
+  const reviewRows = toHumanReviewRows(triaged);
+  const reviewSheet = daily.worksheets.add("需人工复核");
+  const reviewColCount = HUMAN_REVIEW_HEADERS.length;
+  const reviewLastCol = String.fromCharCode(64 + reviewColCount);
+  const allReview = [HUMAN_REVIEW_HEADERS, ...reviewRows];
+  reviewSheet.getRange(`A1:${reviewLastCol}${allReview.length}`).values = allReview;
+  writeHeader(reviewSheet, "A1:" + reviewLastCol + "1", HUMAN_REVIEW_HEADERS);
+  reviewSheet.freezePanes.freezeRows(1);
+  // K=人工确认等级 → A/B/C/D dropdown (only if there are rows)
+  if (reviewRows.length > 0) {
+    const reviewMaxRow = Math.max(allReview.length, 2);
+    reviewSheet.getRange(`K2:K${reviewMaxRow}`).dataValidation = { rule: { type: "list", values: ["A", "B", "C", "D"] } };
+  }
 
   await saveWorkbook(daily, exportPaths.every_other_day_report);
-
-  const { wb: weekly, ws: weeklySheet } = createWorkbookWithSheet(Workbook, "自动双周汇总");
-  const weeklyHeaders = ["日期", "区块", "值", "内容", "说明", "来源等级", "备注"];
-  writeHeader(weeklySheet, "A1:G1", weeklyHeaders);
-  const top = dailyRows.slice(0, 5).map((r, i) => [dateStr, "Top文献", i + 1, r[0], r[2], "abstract_only", r[1]]);
-  const weeklyRows = top.length ? top : [[dateStr, "Top文献", 0, "无导出条目", "", "", ""]];
-  weeklySheet.getRange(`A2:G${weeklyRows.length + 1}`).values = weeklyRows;
-  await saveWorkbook(weekly, exportPaths.biweekly_report);
 
   return {
     headers: DAILY_REVIEW_HEADERS,
     rows_count: dailyRows.length,
     excluded_d_count: triaged.length - dailyRows.length,
-    daily_workbook_sheets: ["每日反馈"],
+    human_review_rows_count: reviewRows.length,
+    total_export_rows_count: dailyRows.length + reviewRows.length,
+    daily_workbook_sheets: ["每日反馈", "需人工复核"],
     preference_learning_sheets: ["每日反馈"],
     standard_summary_sheet_exported: false,
     standard_summary_sheet_name: "",
