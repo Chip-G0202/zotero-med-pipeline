@@ -154,6 +154,7 @@ RSS 订阅 / PubMed 检索  →  去重合并  →  AI 分级(A/B/C/D)  →  写
 |---|---|---|
 | [Zotero](https://www.zotero.org/) | 文献管理工具 | 下载安装即可 |
 | [Zotero MCP Plugin](https://github.com/your-zotero-mcp-plugin) | 让 Codex 读写你的 Zotero 库 | 在 Zotero 插件管理器中安装 |
+| [Zotero Style](https://github.com/muisedman/Zotero-Style) | 文献评分/星标功能（可选） | 在 Zotero 插件管理器中安装 |
 | [Node.js](https://nodejs.org/) >= 18 | 运行管线脚本 | `brew install node` 或官网下载 |
 | [PowerShell 7](https://github.com/PowerShell/PowerShell) >= 7.0 | 跨平台脚本执行 | `brew install powershell` 或官网下载 |
 | [Codex Desktop](https://github.com/openai/codex) | AI 编程助手，运行管线的入口 | 下载安装即可 |
@@ -467,6 +468,7 @@ In Codex's Automation panel:
 |---|---|---|
 | [Zotero](https://www.zotero.org/) | 文献管理工具 | 下载安装即可 |
 | [Zotero MCP Plugin](https://github.com/your-zotero-mcp-plugin) | 让 Codex 读写你的 Zotero 库 | 在 Zotero 插件管理器中安装 |
+| [Zotero Style](https://github.com/muisedman/Zotero-Style) | 文献评分/星标功能（可选） | 在 Zotero 插件管理器中安装 |
 | [Node.js](https://nodejs.org/) >= 18 | 运行管线脚本 | `brew install node` 或官网下载 |
 | [PowerShell 7](https://github.com/PowerShell/PowerShell) >= 7.0 | 跨平台脚本执行 | `brew install powershell` 或官网下载 |
 | [Codex Desktop](https://github.com/openai/codex) | AI 编程助手，运行管线的入口 | 下载安装即可 |
@@ -780,6 +782,7 @@ In Codex's Automation panel:
 |---|---|---|
 | [Zotero](https://www.zotero.org/) | 文献管理工具 | 下载安装即可 |
 | [Zotero MCP Plugin](https://github.com/your-zotero-mcp-plugin) | 让 Codex 读写你的 Zotero 库 | 在 Zotero 插件管理器中安装 |
+| [Zotero Style](https://github.com/muisedman/Zotero-Style) | 文献评分/星标功能（可选） | 在 Zotero 插件管理器中安装 |
 | [Node.js](https://nodejs.org/) >= 18 | 运行管线脚本 | `brew install node` 或官网下载 |
 | [PowerShell 7](https://github.com/PowerShell/PowerShell) >= 7.0 | 跨平台脚本执行 | `brew install powershell` 或官网下载 |
 | [Codex Desktop](https://github.com/openai/codex) | AI 编程助手，运行管线的入口 | 下载安装即可 |
@@ -1130,6 +1133,7 @@ RSS 订阅 / PubMed 检索  →  去重合并  →  AI 分级(A/B/C/D)  →  写
 |---|---|---|
 | [Zotero](https://www.zotero.org/) | 文献管理工具 | 下载安装即可 |
 | [Zotero MCP Plugin](https://github.com/your-zotero-mcp-plugin) | 让 Codex 读写你的 Zotero 库 | 在 Zotero 插件管理器中安装 |
+| [Zotero Style](https://github.com/muisedman/Zotero-Style) | 文献评分/星标功能（可选） | 在 Zotero 插件管理器中安装 |
 | [Node.js](https://nodejs.org/) >= 18 | 运行管线脚本 | `brew install node` 或官网下载 |
 | [PowerShell 7](https://github.com/PowerShell/PowerShell) >= 7.0 | 跨平台脚本执行 | `brew install powershell` 或官网下载 |
 | [Codex Desktop](https://github.com/openai/codex) | AI 编程助手，运行管线的入口 | 下载安装即可 |
@@ -1404,3 +1408,52 @@ In Codex's Automation panel:
 - Runs once every 2 days by default (`RESEARCH_OS_RUN_INTERVAL_DAYS=2`)
 - Can be forced to run immediately by setting `FORCE_RESEARCH_OS_RUN=true` in `.env`
 - Interval logic uses `Asia/Shanghai` timezone with 15:00 planned slot semantics
+
+---
+
+## ⭐ 星标迁移功能（可选）
+
+本功能依赖 [Zotero Style](https://github.com/muisedman/Zotero-Style) 插件，可以将你标记为高星（4-5 星）的文献自动迁移到 \值得精读\ 收藏夹。
+
+### 配置 Zotero Style 插件
+
+1. **安装插件**：从 [Zotero Style Releases](https://github.com/muisedman/Zotero-Style/releases) 下载最新 \.xpi\ 文件，在 Zotero 中通过 \工具 → 插件 → Install Add-on From File\ 安装。
+
+2. **启用评分功能**：安装后，在 Zotero 文献列表中会出现评分列（星星图标）。你可以直接点击星星为文献打分（1-5 星）。
+
+3. **评分方式**：
+   - 鼠标点击星星：直接设置 1-5 星
+   - 快捷键：选中文献后，按数字键 \1\-\5\ 设置星级，按 \ \ 清除评分
+
+### 管线如何使用星标
+
+管线会在每次运行时检查最近 N 天内（默认 7 天）写入 Zotero 的文献，如果发现某篇文献被你标记为 4 星或以上，会自动将其从当日收藏夹迁移到 \值得精读\ 顶级收藏夹。
+
+**环境变量配置**（在 \.env\ 中设置）：
+
+\\\nv
+# 星标迁移模式：expand（默认，扫描 A+B+C 级）/ legacy（仅 A+B 级）/ disabled（禁用）
+ZOTERO_STAR_MIGRATION_MODE=expand
+
+# 扫描窗口：检查最近多少天内的文献（默认 7）
+ZOTERO_STAR_MIGRATION_WINDOW_DAYS=7
+
+# 最低星级阈值：达到多少星才迁移（默认 4，范围 1-5）
+ZOTERO_STAR_MIGRATION_MIN_STARS=4
+\\\
+
+**迁移流程**：
+1. 管线扫描最近写入的文献
+2. 找到星级 ≥ 阈值的文献
+3. 将其添加到 \值得精读\ 收藏夹
+4. 从原日期收藏夹和分级收藏夹中移除（保持整洁）
+
+---
+
+## 🙏 致谢
+
+- [Zotero](https://www.zotero.org/) — 优秀的开源文献管理工具
+- [Zotero Style](https://github.com/muisedman/Zotero-Style) — 提供文献评分/星标功能，让星标迁移成为可能
+- [Zotero MCP](https://github.com/your-zotero-mcp-plugin) — 提供与 Zotero 的 MCP 集成能力
+- [Codex](https://github.com/openai/codex) — AI 编程助手，本项目的代码生成工具
+- [Ollama](https://ollama.ai/) — 本地大语言模型服务，用于语义复审功能
