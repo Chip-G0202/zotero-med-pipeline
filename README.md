@@ -1,9 +1,6 @@
 # Zotero Med Pipeline — 医学文献自动化管线
 
 > 让 Zotero + AI 帮你自动发现、筛选、分级、翻译医学文献，每天几分钟，告别手工整理。
-
-Repository: [https://github.com/Chip-G0202/zotero-med-pipeline](https://github.com/Chip-G0202/zotero-med-pipeline)
-
 基于 [Codex](https://github.com/openai/codex) 构建的医学文献自动化工作流：RSS + PubMed 自动抓取 → AI 分级 → Zotero 写回 → 中文标题翻译 → Excel / docx 报表，全程无需手动翻期刊、筛标题。
 
 **Language / 语言**: [中文](#中文) | [English](#english)
