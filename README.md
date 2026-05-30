@@ -171,7 +171,7 @@ RSS 订阅 / PubMed 检索 → 去重合并 → AI 分级(A/B/C/D) → 写回 Zo
 | 依赖 | 用途 | 安装方式 |
 |---|---|---|
 | [Zotero](https://www.zotero.org/) | 文献管理工具 | 下载安装即可 |
-| Zotero MCP Plugin | 让 Codex 读写你的 Zotero 库 | 在 Zotero 插件管理器中安装 |
+| [Zotero MCP Plugin](https://github.com/cookjohn/zotero-mcp) | 让 Codex 读写你的 Zotero 库 | 在 Zotero 插件管理器中安装 |
 | [Zotero Style](https://github.com/muisedman/Zotero-Style) | 文献评分/星标功能，可选 | 在 Zotero 插件管理器中安装 |
 | [Node.js](https://nodejs.org/) >= 18 | 运行管线脚本 | `brew install node` 或官网下载 |
 | [PowerShell 7](https://github.com/PowerShell/PowerShell) >= 7.0 | 跨平台脚本执行 | `brew install powershell` 或官网下载 |
@@ -462,7 +462,7 @@ ZOTERO_STAR_MIGRATION_MIN_STARS=4
 
 - [Zotero](https://www.zotero.org/) — 优秀的开源文献管理工具。
 - [Zotero Style](https://github.com/muisedman/Zotero-Style) — 提供文献评分和星标功能。
-- Zotero MCP — 提供与 Zotero 的 MCP 集成能力。
+- [Zotero MCP Plugin](https://github.com/cookjohn/zotero-mcp) — 提供与 Zotero 的 MCP 集成能力。
 - [Codex](https://github.com/openai/codex) — AI 编程助手，本项目的代码生成工具。
 - [Ollama](https://ollama.ai/) — 本地大语言模型服务，用于语义复审功能。
 
@@ -632,7 +632,7 @@ You can open Codex, give one instruction, and let the pipeline run. Then you rev
 | Dependency | Purpose | Installation |
 |---|---|---|
 | [Zotero](https://www.zotero.org/) | Reference manager | Download and install |
-| Zotero MCP Plugin | Allows Codex to read and write your Zotero library | Install through the Zotero plugin manager |
+| [Zotero MCP Plugin](https://github.com/cookjohn/zotero-mcp) | Allows Codex to read and write your Zotero library | Install through the Zotero plugin manager |
 | [Zotero Style](https://github.com/muisedman/Zotero-Style) | Optional paper rating/star feature | Install through the Zotero plugin manager |
 | [Node.js](https://nodejs.org/) >= 18 | Runs pipeline scripts | `brew install node` or download from the website |
 | [PowerShell 7](https://github.com/PowerShell/PowerShell) >= 7.0 | Cross-platform script execution | `brew install powershell` or download from the website |
@@ -923,6 +923,6 @@ ZOTERO_STAR_MIGRATION_MIN_STARS=4
 
 - [Zotero](https://www.zotero.org/) — An excellent open-source reference manager.
 - [Zotero Style](https://github.com/muisedman/Zotero-Style) — Provides paper rating and star features.
-- Zotero MCP — Provides MCP integration with Zotero.
+- [Zotero MCP Plugin](https://github.com/cookjohn/zotero-mcp) — Provides MCP integration with Zotero.
 - [Codex](https://github.com/openai/codex) — The AI coding assistant used to generate the implementation.
 - [Ollama](https://ollama.ai/) — Local LLM service used for semantic review.
