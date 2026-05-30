@@ -1,8 +1,8 @@
 {
-  "version": 1,
-  "description": "用户可编辑：流程规则、分级规则、筛选关键词和 feedback 处理说明。长期筛选标准仍以 research_os/文献评价/screening_standards.md 为主。请根据你的研究方向修改下方关键词和期刊列表。",
+  "version": 2,
+  "description": "文献分级规则。主分级由人工定义的研究范围、机制深度、模型类型和排除规则决定；检索关键词只作为证据，不直接决定等级；feedback 只用于边界样本的轻量校准。长期筛选标准仍以 research_os/文献评价/screening_standards.md 为准。可在 Codex 中让 AI 辅助生成（见 README 中的 AI 辅助配置说明）。",
   "triage": {
-    "version": "2026-05-28-v1",
+    "version": "2026-01-01-v1",
     "labels": {
       "A": "A课题相关",
       "B": "B专题相关",
@@ -15,51 +15,162 @@
       "pmc": "PMC",
       "other": "other"
     },
-    "terms": {
-      "_comment_pollutant": "请替换为你的研究关注的暴露因素关键词（英文小写）",
-      "pollutant": ["pollution", "pollutant", "exposure", "toxic"],
-      "_comment_core_topic": "请替换为你的核心研究方向关键词（英文小写）",
-      "core_topic": ["disease", "pathology", "injury", "disorder"],
-      "_comment_mechanism": "机制相关关键词，可保留通用项，按需增减",
-      "mechanism": ["pathway", "mechanism", "axis", "omics", "signaling", "model"]
+    "research_focus": {
+      "_comment_primary_question": "用一句话描述你的核心研究问题，例如：关注 [暴露因素] 与 [生物机制/疾病] 之间的关系。",
+      "primary_question": "[占位] 请描述你的核心研究问题，例如：关注环境污染物与神经系统毒性机制之间的关系。",
+      "_comment_preferred_evidence": "你偏好的证据类型和研究方向关键词（英文小写）。",
+      "preferred_evidence": [],
+      "_comment_core_exposure_terms": "你关注的暴露因素关键词（英文小写），例如：pollutant, exposure, toxicant",
+      "core_exposure_terms": [],
+      "_comment_core_biology_terms": "你关注的核心生物学/疾病方向关键词（英文小写），例如：neurotoxicity, inflammation, mitochondria",
+      "core_biology_terms": [],
+      "_comment_mechanism_terms": "机制相关关键词，可保留通用项，按需增减。",
+      "mechanism_terms": []
     },
-    "journal_whitelist": [
-      "_comment_请替换为你关注的期刊，格式为小写全称",
-      "nature",
-      "science",
-      "cell"
+    "priority_rules": {
+      "_comment_strongly_prioritize": "你最优先关注的研究类型（中文描述）。",
+      "strongly_prioritize": [],
+      "_comment_downgrade": "你想降低优先级的研究类型（中文描述）。",
+      "downgrade": [],
+      "_comment_strict_exclude": "你想直接排除的研究类型（中文描述）。谨慎使用。",
+      "strict_exclude": []
+    },
+    "grading_rules": {
+      "_comment": "请根据你的研究方向描述每个等级的定义、典型场景和处理方式。以下为占位示例。",
+      "A": {
+        "definition": "[占位] 直接命中当前核心研究方向，且具有明确机制深度或实验验证价值。",
+        "required_features": [
+          "[占位] 与核心暴露因素方向直接相关",
+          "[占位] 与核心生物学机制直接相关",
+          "[占位] 具有强证据支持（动物实验、细胞实验、机制验证等）"
+        ],
+        "typical_cases": [
+          "[占位] 同时涉及目标暴露因素和核心生物机制的机制研究",
+          "[占位] 使用哺乳动物模型研究暴露与毒性机制的论文"
+        ],
+        "action": "[占位] 优先精读，进入重点文献库。"
+      },
+      "B": {
+        "definition": "[占位] 与当前专题明显相关，但不是完全核心。可作为背景、相邻机制或方法来源。",
+        "typical_cases": [
+          "[占位] 只命中暴露因素或生物机制之一",
+          "[占位] 机制深度中等，可作为背景参考"
+        ],
+        "action": "[占位] 保留，作为专题背景或方法借鉴。"
+      },
+      "C": {
+        "definition": "[占位] 属于大领域背景，但距离当前核心课题较远。",
+        "typical_cases": [
+          "[占位] 宽泛相关的领域研究，机制深度不足",
+          "[占位] 纯观察性研究，缺乏机制解释"
+        ],
+        "action": "[占位] 低优先级保留。"
+      },
+      "D": {
+        "definition": "[占位] 与当前课题相关性不足，或命中严格排除条件。",
+        "typical_cases": [
+          "[占位] 命中严格排除规则的研究",
+          "[占位] 关键词偶然命中但实际不相关"
+        ],
+        "action": "[占位] 不进入阅读队列，仅保留审计记录。"
+      }
+    },
+    "_comment_decision_process": "分级决策流程，按顺序执行。请根据你的分级规则填写。",
+    "decision_process": [
+      "[占位] 第一步：检查 strict_exclude，命中则标为 D。",
+      "[占位] 第二步：判断核心暴露相关性。",
+      "[占位] 第三步：判断核心生物机制相关性。",
+      "[占位] 第四步：综合评估证据类型和机制深度，确定 A/B/C。",
+      "[占位] 第五步：检查 uncertain_boundaries，处理边界情况。"
     ],
-    "weights": {
-      "pollutant": 1.6,
-      "core_topic": 1.5,
-      "mechanism": 0.7,
-      "journal_quality": 1.2,
-      "feedback_positive": 0.6,
-      "feedback_negative": -1.0
-    },
-    "thresholds": {
-      "A_score": 6.0,
-      "A_min_pollutant_hits": 2,
-      "A_min_core_hits": 2,
-      "B_score": 3.4,
-      "C_score": 1.4,
-      "B_uncertain_below": 4.2,
-      "C_uncertain_below": 2.3
-    },
-    "grade_reasons": {
-      "A": "直接命中当前课题关键词组合，与核心课题问题高度贴合。",
-      "B": "与当前专题或邻近专题明显相关，可作为专题背景或方法参考。",
-      "C": "与所在研究领域相关，但距离当前课题和专题较远，低优先级保留。",
-      "D": "与当前课题、专题和领域相关性不足，仅保留审计记录。"
+    "_comment_uncertain_boundaries": "边界情况处理规则。请根据你的研究方向填写。",
+    "uncertain_boundaries": [
+      {
+        "case": "[占位] 缺乏机制验证的纯临床结局研究",
+        "default_grade": "C",
+        "upgrade_condition": "[占位] 若能提供明确机制线索或可转化假设，可升为 B。"
+      },
+      {
+        "case": "[占位] 缺乏功能验证的大规模组学关联研究",
+        "default_grade": "C",
+        "upgrade_condition": "[占位] 若组学结果指向核心机制且有部分验证，可升为 B 或 A。"
+      }
+    ],
+    "reason_format": {
+      "required_fields": [
+        "grade",
+        "matched_scope",
+        "missing_or_weak_scope",
+        "evidence_type",
+        "grade_reason",
+        "uncertainty"
+      ],
+      "field_definitions": {
+        "grade": "A/B/C/D 分级结果。",
+        "matched_scope": "命中的核心范围，例如暴露因素、生物机制、模型、实验类型。",
+        "missing_or_weak_scope": "缺失或较弱的部分，例如无机制验证、非核心领域、纯观察性。",
+        "evidence_type": "证据类型，例如 animal study、in vitro、mechanism、omics with validation、cohort、clinical、engineering。",
+        "grade_reason": "一句话说明为什么给出该等级。",
+        "uncertainty": "低/中/高。不确定时说明边界原因。"
+      },
+      "example": {
+        "grade": "B",
+        "matched_scope": "[占位] 命中 [暴露因素] 和 [生物机制]",
+        "missing_or_weak_scope": "[占位] 缺少 [某关键验证]",
+        "evidence_type": "[占位] observational study with limited mechanistic discussion",
+        "grade_reason": "[占位] 可作为背景参考，但机制证据不足，暂列 B。",
+        "uncertainty": "中"
+      }
     }
   },
   "feedback_learning": {
-    "article_feedback_values": ["keep", "drop", "upgrade", "downgrade"],
+    "enabled": true,
+    "principle": "feedback 用于校准边界样本和发现长期偏好，不直接推翻人工定义的筛选标准，不把语义相似文献当作伪标签。",
+    "article_feedback_values": [
+      "keep",
+      "drop",
+      "upgrade",
+      "downgrade"
+    ],
     "comment_optional": true,
+    "how_to_use_feedback": {
+      "keep": "表示用户认可该文献有保留价值。未来相似文献可在 B/C 或 C/D 边界上适度上调，但不能把明显无关或命中 strict_exclude 的文献升为 A。",
+      "drop": "表示用户认为该文献不值得保留。未来相似文献可在 B/C 或 C/D 边界上适度下调，但不能自动排除直接命中核心暴露、生物机制和实验验证的文献。",
+      "upgrade": "表示当前规则低估了该文献。应记录升级原因，尤其是被低估的机制类型、模型类型、疾病背景或可迁移价值。",
+      "downgrade": "表示当前规则高估了该文献。应记录误判原因，尤其是关键词误导、机制不足、纯观察性或范围外主题。"
+    },
     "semantic_search": {
       "adapter": "zotero_mcp",
-      "tools": ["semantic_status", "semantic_search"],
-      "purpose": "用于 feedback 偏好学习的弱证据扩展，不直接扩展当日候选池，不把语义邻居当作伪标签。"
+      "tools": [
+        "semantic_status",
+        "semantic_search"
+      ],
+      "purpose": "仅用于发现与 keep/upgrade/drop/downgrade 文献相似的偏好趋势或解释线索，不直接扩展当日候选池，不把语义邻居当作伪标签。"
+    },
+    "learning_policy": {
+      "auto_update_allowed": [
+        "记录高频 keep 或 upgrade 的主题模式",
+        "记录高频 drop 或 downgrade 的误判模式",
+        "建议新增、删除或调整关键词",
+        "建议补充 downgrade 或 strict_exclude 规则",
+        "建议把反复出现的边界情况加入 uncertain_boundaries"
+      ],
+      "auto_update_forbidden": [
+        "根据单次 feedback 永久改变 A/B/C/D 定义",
+        "自动重写 primary_question 或 research_focus",
+        "自动把语义相似文献标为正例或负例",
+        "自动删除人工定义的严格排除规则",
+        "自动把高影响因子期刊文献升为 A",
+        "自动把某一类研究一概排除"
+      ],
+      "manual_review_trigger": [
+        "同一原因连续出现 3 次 upgrade",
+        "同一原因连续出现 3 次 downgrade",
+        "A 类文献被用户多次 drop",
+        "D 类文献被用户多次 upgrade",
+        "某个负向关键词反复误杀有价值文献",
+        "某个正向关键词反复导致无关文献升高"
+      ]
     }
   }
 }
