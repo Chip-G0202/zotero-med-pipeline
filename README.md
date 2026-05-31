@@ -118,8 +118,6 @@ v1.2 完善了 macOS 场景下的路径检测、进程检测和启动策略。�
 RSS 订阅 / PubMed 检索 → 去重合并 → AI 分级(A/B/C/D) → 写回 Zotero → 标题翻译 → 导出 Excel / docx 报表
 ```
 
-每天打开 Codex 说一句话，它可以自动跑完整条管线。你只需要打开报表看结果。
-
 ### 有什么优势
 
 - **不用再翻期刊目录** — RSS 自动抓取，PubMed 定时检索，文献自己找上门。
@@ -197,15 +195,6 @@ cp .env.example .env
 编辑 `.env` 文件，填入你的配置：
 
 ```env
-# 必填：Zotero MCP 插件的 API Key
-ZOTERO_API_KEY=your_zotero_api_key_here
-
-# 必填：你的 Zotero 用户或群组库 ID
-ZOTERO_LIBRARY_ID=your_zotero_library_id_here
-
-# 必填：库类型。个人库填 user，群组库填 group
-ZOTERO_LIBRARY_TYPE=user_or_group
-
 # Zotero MCP 服务地址
 ZOTERO_MCP_URL=http://127.0.0.1:23120/mcp
 ZOTERO_MCP_BASE_URL=http://127.0.0.1:23120
@@ -229,9 +218,6 @@ TITLE_TRANSLATION_MODEL=YOUR_MODEL
 
 | 变量 | 是否必填 | 说明 |
 |---|---|---|
-| `ZOTERO_API_KEY` | 是 | Zotero MCP 插件的 API Key |
-| `ZOTERO_LIBRARY_ID` | 是 | Zotero 用户库或群组库 ID |
-| `ZOTERO_LIBRARY_TYPE` | 是 | 个人库填 `user`，群组库填 `group` |
 | `TITLE_TRANSLATION_API_KEY` | 否 | 标题翻译 API Key。为空时跳过翻译，保留英文标题 |
 | `PREFERENCE_LEARNING_API_KEY` | 否 | 偏好学习 LLM API Key。为空时可回退到翻译 API Key |
 | `ZOTERO_MCP_URL` | 否 | Zotero MCP 地址，默认 `http://127.0.0.1:23120/mcp` |
@@ -579,8 +565,6 @@ The workflow design and pipeline logic were designed by me. The implementation w
 RSS feeds / PubMed search → Deduplication → AI grading (A/B/C/D) → Zotero write-back → Title translation → Excel / docx reports
 ```
 
-You can open Codex, give one instruction, and let the pipeline run. Then you review the generated report.
-
 ### Advantages
 
 - **No more manual journal browsing** — RSS and PubMed searches bring new papers to you.
@@ -658,15 +642,6 @@ cp .env.example .env
 Edit `.env` and fill in your values:
 
 ```env
-# Required: API key from your Zotero MCP plugin
-ZOTERO_API_KEY=your_zotero_api_key_here
-
-# Required: your Zotero user or group library ID
-ZOTERO_LIBRARY_ID=your_zotero_library_id_here
-
-# Required: library type. Use user for personal libraries and group for group libraries
-ZOTERO_LIBRARY_TYPE=user_or_group
-
 # Zotero MCP service URL
 ZOTERO_MCP_URL=http://127.0.0.1:23120/mcp
 ZOTERO_MCP_BASE_URL=http://127.0.0.1:23120
@@ -690,9 +665,6 @@ TITLE_TRANSLATION_MODEL=YOUR_MODEL
 
 | Variable | Required | Description |
 |---|---|---|
-| `ZOTERO_API_KEY` | Yes | API key from the Zotero MCP plugin |
-| `ZOTERO_LIBRARY_ID` | Yes | Zotero user or group library ID |
-| `ZOTERO_LIBRARY_TYPE` | Yes | Use `user` for personal libraries and `group` for group libraries |
 | `TITLE_TRANSLATION_API_KEY` | No | Title translation API key. If empty, translation is skipped and English titles are kept |
 | `PREFERENCE_LEARNING_API_KEY` | No | Preference-learning LLM API key. Can fall back to the translation API key |
 | `ZOTERO_MCP_URL` | No | Zotero MCP URL. Default: `http://127.0.0.1:23120/mcp` |
