@@ -91,6 +91,24 @@ node --env-file=.env tools/run_zotero_literature_filter.mjs
 ```
 
 
+## Skills 说明
+
+`Skills/` 目录包含本项目配套的 Codex / agent skills，用于把文献自动化流程拆分成可复用、可审计的工作单元。它们不是独立运行的脚本，而是给 Codex 或其他支持 skills 的 agent 使用的工作说明，帮助 agent 按固定阶段执行检索、分级、写回、反馈学习和报表导出。
+
+这些 skills 的作用是把复杂流程拆成明确边界：哪个阶段负责读取反馈，哪个阶段负责并行检索，哪个阶段负责 A/B/C/D 分级，哪个阶段负责 Zotero 写回，哪个阶段负责导出文件。这样可以减少每次运行时的临时判断，让流程更稳定，也方便后续修改某个环节而不影响其它模块。
+
+当前包含的主要 skills：
+
+- `med-stage-orchestrator`：约束 Stage 1 到 Stage 4 的执行顺序、门禁和降级状态。
+- `med-entry-parallel`：管理 RSS 与 PubMed/PMC 两个入口的并行检索、标准化和去重前汇聚。
+- `med-query-learning`：从用户反馈和筛选标准中提取偏好证据，用于后续检索与筛选优化。
+- `med-daily-triage`：根据规则和语义信号对文献进行 A/B/C/D 分级，并生成每日反馈表所需字段。
+- `med-zotero-bridge`：通过 Zotero MCP 处理文献写回、收藏夹归类和标题翻译补全。
+- `med-semantic-grading`：在规则分级之后执行语义复核，辅助识别需要升级、降级或人工复核的条目。
+- `med-weekly-synthesis`：在每日流程完成后维护周期性汇总与双周报告输出。
+- `med-export-policy`：定义 `.xlsx` / `.docx` 导出优先级、fallback 链和审计字段。
+- `med-screening-standards`：管理长期筛选标准文件，处理用户对筛选规则的修订建议。
+
 ## 支持项目
 
 如果该项目帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。
@@ -195,6 +213,24 @@ It is designed for researchers and teams who need to monitor new papers, filter 
 cd Automation
 node --env-file=.env tools/run_zotero_literature_filter.mjs
 ```
+## About Skills
+
+The `Skills/` directory contains the Codex / agent skills used by this project. These skills split the literature automation workflow into reusable and auditable work units. They are not standalone scripts. Instead, they are operating instructions for Codex or other agents that support skills, helping the agent run retrieval, triage, Zotero writeback, feedback learning, and report export in a consistent order.
+
+The purpose of these skills is to give each workflow stage a clear boundary: which stage reads feedback, which stage runs parallel retrieval, which stage performs A/B/C/D triage, which stage writes to Zotero, and which stage exports user-facing files. This reduces ad hoc decisions during each run, makes the workflow more stable, and allows one stage to evolve without rewriting the whole pipeline.
+
+Included skills:
+
+- `med-stage-orchestrator`: Enforces Stage 1 to Stage 4 ordering, gates, and degrade statuses.
+- `med-entry-parallel`: Handles parallel RSS and PubMed/PMC retrieval, normalization, and pre-dedup aggregation.
+- `med-query-learning`: Extracts preference evidence from user feedback and screening standards for future search and triage refinement.
+- `med-daily-triage`: Applies rule-based and semantic A/B/C/D grading and prepares fields used by the daily feedback workbook.
+- `med-zotero-bridge`: Uses Zotero MCP for item writeback, collection placement, and title translation backfill.
+- `med-semantic-grading`: Runs semantic review after rule-based grading to suggest upgrades, downgrades, or human review.
+- `med-weekly-synthesis`: Maintains periodic synthesis and biweekly report outputs after daily workflow completion.
+- `med-export-policy`: Defines `.xlsx` / `.docx` export priority, fallback chains, and audit fields.
+- `med-screening-standards`: Manages the long-lived screening standards file and user-proposed rule revisions.
+
 
 ## Paid Setup & Research Direction Packs
 
