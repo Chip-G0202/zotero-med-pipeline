@@ -1,0 +1,16 @@
+{
+  "model": "example-preference-learning-model",
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "stream": false,
+  "thinking": false,
+  "timeout_ms": 30000,
+  "max_retries": 2,
+  "max_output_tokens": 3000,
+  "response_format": "json_schema",
+  "prompt_file": "prompts/preference_learning.md",
+  "api_key_env_fallback_order": [
+    "PREFERENCE_LEARNING_API_KEY",
+    "TITLE_TRANSLATION_API_KEY"
+  ]
+}

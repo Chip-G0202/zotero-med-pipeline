@@ -1,0 +1,159 @@
+{
+  "version": 2,
+  "description": "Public example literature triage rules. Replace placeholder terms with your own project scope.",
+  "triage": {
+    "version": "public-v1.3-example",
+    "labels": {
+      "A": "A课题相关",
+      "B": "B专题相关",
+      "C": "C领域相关",
+      "D": "D无关"
+    },
+    "source_labels": {
+      "rss": "RSS",
+      "pubmed": "PubMed",
+      "pmc": "PMC",
+      "other": "other"
+    },
+    "research_focus": {
+      "primary_question": "Placeholder biomedical literature triage scope for public release.",
+      "preferred_evidence": [
+        "mechanism study",
+        "animal study",
+        "in vitro study",
+        "clinical study with mechanistic rationale"
+      ],
+      "core_exposure_terms": [
+        "example exposure",
+        "sample intervention",
+        "biomedical factor"
+      ],
+      "core_biology_terms": [
+        "example mechanism",
+        "sample pathway",
+        "example outcome"
+      ],
+      "mechanism_terms": [
+        "mechanism",
+        "pathway",
+        "signaling",
+        "model",
+        "experimental validation"
+      ]
+    },
+    "priority_rules": {
+      "strongly_prioritize": [
+        "Mechanistic or experimentally validated studies within the configured scope."
+      ],
+      "downgrade": [
+        "Broadly related observational or descriptive studies without clear scope match."
+      ],
+      "strict_exclude": [
+        "Records outside the configured biomedical scope or without usable metadata."
+      ]
+    },
+    "grading_rules": {
+      "A": {
+        "definition": "Directly matches the configured core scope and contains strong evidence.",
+        "typical_cases": [
+          "Configured topic plus configured mechanism with validation."
+        ],
+        "action": "Prioritize for close reading."
+      },
+      "B": {
+        "definition": "Clearly related to the configured topic or mechanism but not fully core.",
+        "typical_cases": [
+          "Adjacent topic or useful method/background."
+        ],
+        "action": "Keep as supporting literature."
+      },
+      "C": {
+        "definition": "Broad field relevance with low short-term priority.",
+        "typical_cases": [
+          "General background only."
+        ],
+        "action": "Keep for audit or later background review."
+      },
+      "D": {
+        "definition": "Outside the configured scope.",
+        "typical_cases": [
+          "Unrelated topic or excluded record type."
+        ],
+        "action": "Audit only."
+      }
+    },
+    "decision_process": [
+      "Check exclusions first.",
+      "Evaluate configured topic match.",
+      "Evaluate evidence strength.",
+      "Assign A/B/C/D conservatively."
+    ],
+    "keyword_policy": {
+      "principle": "Keywords are evidence only and do not determine grade by themselves.",
+      "positive_keyword_groups": {
+        "exposure": [
+          "example exposure"
+        ],
+        "core_topic": [
+          "example mechanism"
+        ],
+        "mechanism": [
+          "mechanism",
+          "pathway",
+          "validation"
+        ]
+      },
+      "negative_keywords": [
+        "example exclusion"
+      ]
+    },
+    "terms": {
+      "exposure": [
+        "example exposure",
+        "sample topic"
+      ],
+      "core_topic": [
+        "example mechanism",
+        "sample outcome"
+      ],
+      "mechanism": [
+        "mechanism",
+        "pathway",
+        "validation"
+      ]
+    },
+    "journal_whitelist": [
+      "nature",
+      "science",
+      "cell"
+    ],
+    "weights": {
+      "exposure": 1.6,
+      "core_topic": 1.5,
+      "mechanism": 0.7,
+      "journal_quality": 1.2,
+      "feedback_positive": 0.6,
+      "feedback_negative": -1
+    },
+    "thresholds": {
+      "A_score": 6,
+      "A_min_exposure_hits": 2,
+      "A_min_core_hits": 2,
+      "B_score": 3.4,
+      "C_score": 1.4,
+      "B_uncertain_below": 4.2,
+      "C_uncertain_below": 2.3
+    },
+    "grade_reasons": {
+      "A": "Direct match to configured scope.",
+      "B": "Related to configured topic or adjacent topic.",
+      "C": "Broad background relevance.",
+      "D": "Insufficient relevance to configured scope."
+    },
+    "semantic_grading": {
+      "enabled": true,
+      "min_score": 0.45,
+      "top_k": 5
+    }
+  }
+}
