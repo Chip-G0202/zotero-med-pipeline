@@ -2,8 +2,6 @@
 
 一个基于 Codex 构建的科研文献自动化工作流，让 Zotero + AI 帮你实现文献发现、筛选分级、Zotero 写回、标题翻译、偏好学习和报表生成。
 
-MIT License | Codex workflow | v1.3 update
-
 [中文](#中文) | [English](#english-version)
 
 # 中文
@@ -141,8 +139,6 @@ MIT License. See [LICENSE](LICENSE).
 
 A Codex-driven research literature automation workflow for discovery, triage, Zotero writeback, translation, feedback learning, and report generation.
 
-MIT License | Codex workflow | v1.3 update
-
 [Quick Start](#quick-start-with-codex) | [Paid Setup](#paid-setup--research-direction-packs)
 
 ## v1.3 update
@@ -217,8 +213,8 @@ RSS source selection, PubMed/PMC query design, A/B/C/D screening rules, translat
 ## Support the Project
 
 If this project helps you, you can buy me a coffee or send a small appreciation to support continued maintenance.
+<img width="600" alt="ca00b3d9c0e40d64ec9e2eed542181ed" src="https://github.com/user-attachments/assets/12a37b6c-97f1-4ae0-95d1-376e9cc60f33" />
 
-> Payment QR or support link placeholder.
 
 ## Acknowledgements
 
