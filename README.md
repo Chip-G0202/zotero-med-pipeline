@@ -1,139 +1,127 @@
 # Zotero Med Pipeline
 
-一个基于 Codex、Zotero 和 Zotero MCP 的医学文献自动化工作流，用于文献发现、筛选分级、Zotero 写回、标题翻译、偏好学习和报表生成。
+一个基于 Codex 的科研文献自动化工作流，用于文献发现、筛选分级、Zotero 写回、标题翻译、偏好学习和报表生成。
 
-[English](#english)
+MIT License | Codex workflow | v1.3 update
+
+[快速开始](#接入-codex-创建自动化) | [付费配置服务](#付费安装配置与研究方向配置包) | [English](#english-version)
 
 ## v1.3 update
 
-v1.3 将项目整理为两个公开模块：
+v1.3 将项目整理为两个公开模块：**Automation** 和 **Skills**。前者包含自动化脚本、配置、Prompt、测试和文档；后者包含工作流依赖的 Codex / agent skills。
 
-- `Automation/`: 自动化工作流代码、配置模板、prompt、测试和文档。
-- `Skills/`: 工作流依赖的 Codex / agent skills，用于阶段编排、检索入口、分级、Zotero 写回、翻译补全、反馈学习和报表导出。
-
-仓库根目录只保留 `README.md`、`LICENSE`、`Automation/` 和 `Skills/`，方便在 GitHub 上直接查看项目说明，并让 GitHub 正常识别 MIT license。
+| 更新方向 | 内容 |
+| --- | --- |
+| 稳定性与代码优化 | 优化核心工作流代码，减少自动化运行中潜在的报错；收敛重复能力，明确模块职责。 |
+| 筛选与语义能力 | 优化 A/B/C/D 分级规则、语义复审和 semantic search 接入，让筛选结果更稳定、更可审计。 |
+| 日报与反馈体验 | 优化日报格式，便于阅读、反馈、人工复核和后续偏好学习。 |
+| 公开发布整理 | 压缩文档、准备脱敏示例，降低理解成本，便于 GitHub 发布和复用。 |
 
 ## 这是什么？
 
-Zotero Med Pipeline 是一个面向科研人员的文献自动化管线。它把 RSS 订阅、PubMed/PMC 检索、去重、A/B/C/D 分级、Zotero 收藏夹写回、中文标题翻译和隔日报/双周报导出放进同一条可审计流程。
+Zotero Med Pipeline 是一个围绕 Codex、Zotero、Zotero MCP、RSS、PubMed/PMC、可配置筛选规则和报表导出构建的科研文献自动化工作流。
 
-典型流程：
+它适合需要长期跟踪新文献、整理检索结果、维护 Zotero 文献库、收集反馈并定期生成文献评价报告的科研者和研究团队。
 
-```text
-RSS / PubMed-PMC -> merge + dedup -> A/B/C/D triage -> Zotero MCP writeback -> title translation -> workbook/report export
-```
+> 它不会替代研究判断，而是负责重复性的第一轮筛选、归类和记录，把最终判断留给研究者。
 
-## 适合解决的问题
+## 痛点与解决
 
-| 常见痛点 | 工作流做什么 |
+| 常见痛点 | 工作流如何解决 |
 | --- | --- |
-| 每天手动翻期刊目录耗时 | RSS 和 PubMed/PMC 统一入口，自动收集候选文献 |
-| 标题摘要筛选重复、主观、容易漏 | 使用可配置规则和语义复核输出 A/B/C/D 分级 |
-| Zotero 收藏夹需要手动整理 | 通过 Zotero MCP 写回每日来源集合和等级集合 |
-| 英文标题浏览效率低 | 对 A/B/C 文献执行标题翻译补全 |
-| 反馈无法沉淀 | 从隔日报反馈和 `screening_standards.md` 中学习偏好，并保留审计 JSON |
-| 周期性汇总麻烦 | 自动导出隔日报 workbook，并按周期生成双周汇总 |
+| 新文献分散在 RSS、PubMed、期刊推送中。 | 将 RSS 和 PubMed/PMC 检索整合到同一流程。 |
+| 检索结果重复多、噪声多。 | 按 DOI、PMID、PMCID、URL、规范化标题去重。 |
+| 人工初筛重复、耗时、标准容易漂移。 | 使用可配置 A/B/C/D 分级规则，并保留审计记录。 |
+| Zotero 收藏夹长期使用后容易混乱。 | 通过 Zotero MCP 自动写回并归入结构化收藏夹。 |
+| 反馈难以沉淀，下一次筛选仍然从头开始。 | 读取反馈和筛选标准，用于后续偏好学习。 |
 
 ## 核心特色
 
-- **双入口检索**: RSS 与 PubMed/PMC 并行获取候选文献。
-- **统一去重**: 按 DOI、PMID/PMCID、URL、规范化标题逐级去重。
-- **A/B/C/D 分级**: 规则分级与语义复核结合，保留初始等级、语义等级和最终等级。
-- **Zotero MCP 写回**: 不直接编辑 Zotero 数据库，只通过 MCP 工具写入和移动条目。
-- **反馈学习**: 从用户在隔日报中的反馈和长期筛选标准中提取偏好证据。
-- **可审计输出**: 关键阶段写入 JSON 报告，记录降级、跳过和失败原因。
-- **公开发布结构**: 自动化代码与 skills 分离，便于复用、审查和二次开发。
+| 特色 | 说明 |
+| --- | --- |
+| 四阶段自动化 | 检索、去重、分级、Zotero 写回、翻译和报表导出串成完整流程。 |
+| 可配置分级 | 通过配置文件定义 A/B/C/D 筛选标准，让流程适配不同研究方向。 |
+| 反馈学习 | 将用户反馈和筛选标准沉淀为可审计的偏好更新。 |
+| Zotero MCP 集成 | 自动创建条目并归入日期、来源和分级收藏夹。 |
+| 语义复审 | 结合 semantic search，为边界文献提供辅助复核信号。 |
+| 日报与周期报告 | 输出便于人工复核、反馈和长期追踪的文献评价文件。 |
 
 ## 目录结构
 
 ```text
 Automation/
-  AGENTS.md
-  README.md
-  .env.example
-  package.json
-  package-lock.json
-  config/
-  prompts/
-  tools/
-  tests/
-  docs/
+  tools/        # 自动化脚本
+  config/       # RSS、PubMed/PMC、分级、翻译和偏好学习配置
+  prompts/      # 翻译和偏好学习 Prompt
+  tests/        # 轻量验证测试
+  docs/         # 工作流契约与技术说明
+  .env.example  # 环境变量模板
 
 Skills/
   med-stage-orchestrator/
-  med-query-learning/
   med-entry-parallel/
+  med-query-learning/
   med-daily-triage/
   med-zotero-bridge/
-  med-semantic-grading/
   med-weekly-synthesis/
   med-export-policy/
   med-screening-standards/
+  med-semantic-grading/
 ```
 
-## 快速开始
+## 接入 Codex 创建自动化
 
-1. 安装 Node.js 18 或更新版本。
-2. 安装 PowerShell 7 或更新版本。
-3. 安装 Zotero Desktop，并确保 Zotero MCP 可用。
-4. 在 Codex 中打开项目，工作目录切到 `Automation`。
-5. 复制 `.env.example` 为 `.env`，填入本地配置。不要提交 `.env`。
-6. 根据自己的研究方向修改 `Automation/config/` 中的公开模板。
-
-运行主流程：
+1. 准备 Node.js 18+、PowerShell 7+、Zotero Desktop、Zotero MCP Plugin；如需语义复审，可准备 Ollama。
+2. 在 Codex 中打开项目，并将工作目录切到 `Automation`。
+3. 让 Codex 读取 `Automation/AGENTS.md`、`Automation/README.md` 和 `Skills/`。
+4. 复制 `.env.example` 为 `.env`，配置 Zotero MCP、翻译模型、偏好学习等本地参数。
+5. 修改 `config/` 下的 RSS、PubMed 检索式、筛选标准、翻译配置和偏好学习配置。
+6. 在 Codex 中运行主入口，并让 Codex 汇报每个阶段的结果。
 
 ```powershell
 cd Automation
 node --env-file=.env tools/run_zotero_literature_filter.mjs
 ```
 
-## 推荐给 Codex 的使用方式
-
-在 Codex 中可以这样描述任务：
+建议给 Codex 的提示词：
 
 ```text
 读取 Automation/AGENTS.md，从 Automation 目录运行主工作流，按 Stage 1 到 Stage 4 汇报结果，并说明任何降级或失败原因。
 ```
 
-主入口会按顺序执行：
-
-1. Stage 1: RSS / PubMed-PMC 获取、合并、去重、分级和审计输出。
-2. MCP readiness: 检查 Zotero MCP 是否可用。
-3. Stage 2: 将 A/B/C 条目写回 Zotero。
-4. Stage 3: 对写回条目补全标题翻译。
-5. Stage 4: 导出用户可读的隔日报和周期汇总。
-
-## 验证
-
-基础本地检查：
-
-```powershell
-cd Automation
-node --check tools/run_zotero_literature_filter.mjs
-node --test tests/*.test.mjs
-```
-
-完整端到端运行依赖 Zotero、Zotero MCP、外部检索和本地 API 配置；公开仓库中的配置文件仅作为模板。
-
-## 安全边界
-
-- 不提交 `.env`、API key、token、日志、缓存、导出结果或 Zotero 数据库文件。
-- PDF 获取不在自动化范围内，用户仍在 Zotero 中手动处理 PDF。
-- 工作流通过 Zotero MCP 读写 Zotero，不直接编辑 `zotero.sqlite`。
-- 公开配置中的研究方向、RSS 源和 PubMed 查询均应替换为你自己的本地值。
-
 ## 付费安装配置与研究方向配置包
 
-本项目本身开源，你可以自由下载、修改和自部署。付费服务主要面向希望节省配置时间、快速落地工作流，或希望为特定研究方向准备筛选配置的人。
+本项目本身开源，你可以自由下载、修改和自部署。付费服务主要面向希望节省配置时间、快速落地工作流、或希望为特定研究方向准备筛选配置的人。
 
-- **安装与首跑配置**: 依赖安装、`.env` 设置、Zotero MCP 检查、翻译和偏好学习配置、Codex 自动化设置、首跑问题排查。
-- **研究方向配置包**: RSS 源选择、PubMed/PMC 查询设计、A/B/C/D 筛选规则、翻译设置、偏好学习设置和自动化检查清单。
+### 付费安装配置服务
+
+适合希望把工作流在本地跑起来，但不想自己处理环境和配置细节的用户。
+
+- 依赖安装与运行环境检查
+- `.env`、Zotero MCP、翻译模型和偏好学习配置
+- Codex 自动化设置与首次运行排查
+
+### 研究方向配置包
+
+适合已经有明确研究方向，希望直接获得一套可复用配置模板的用户。
+
+- RSS 与 PubMed/PMC 检索式设计
+- A/B/C/D 筛选标准与分级规则配置
+- 翻译、偏好学习和自动化运行清单配置
+
+## 支持项目
+
+如果该项目帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。
+
+> 这里可放置你的收款码或赞赏链接。
 
 ## 致谢
 
-- [Codex](https://github.com/openai/codex)
-- [Zotero](https://www.zotero.org/)
-- [Zotero MCP plugin](https://github.com/cookjohn/zotero-mcp)
+- **Zotero** - 优秀的开源文献管理工具。
+- **Zotero Style** - 提供文献评分和星标功能。
+- **Zotero MCP Plugin** - 提供与 Zotero 的 MCP 集成能力。
+- **Codex** - AI 编程助手，本项目的代码生成工具。
+- **Ollama** - 本地大语言模型服务，用于语义复审功能。
 
 ## License
 
@@ -141,77 +129,96 @@ MIT License. See [LICENSE](LICENSE).
 
 ---
 
-# English
+# English Version
 
 # Zotero Med Pipeline
 
-A Codex-driven medical literature automation workflow for discovery, triage, Zotero writeback, title translation, feedback learning, and report generation.
+A Codex-driven research literature automation workflow for discovery, triage, Zotero writeback, translation, feedback learning, and report generation.
+
+MIT License | Codex workflow | v1.3 update
+
+[Quick Start](#quick-start-with-codex) | [Paid Setup](#paid-setup--research-direction-packs)
 
 ## v1.3 update
 
-v1.3 reorganizes the project into two public modules:
+v1.3 reorganizes the project into two public modules: **Automation** and **Skills**.
 
-- `Automation/`: workflow code, public configuration templates, prompts, tests, and documentation.
-- `Skills/`: Codex / agent skills used by the workflow for orchestration, retrieval, triage, Zotero writeback, translation backfill, feedback learning, and report export.
-
-The repository root intentionally contains only `README.md`, `LICENSE`, `Automation/`, and `Skills/` so GitHub can show the project overview and detect the MIT license cleanly.
+- Optimized core workflow code and reduced potential runtime errors.
+- Improved A/B/C/D grading rules.
+- Improved semantic review and semantic search integration.
+- Improved daily report format for reading, feedback, and review.
+- Consolidated overlapping capabilities into clearer module ownership.
+- Compressed and cleaned up documentation for public release.
+- Prepared sanitized examples for GitHub publishing and reuse.
 
 ## What is this?
 
-Zotero Med Pipeline is a research literature automation pipeline for biomedical researchers. It combines RSS feeds, PubMed/PMC retrieval, deduplication, A/B/C/D grading, Zotero collection writeback, Chinese title translation, and recurring workbook/report export into one auditable workflow.
+Zotero Med Pipeline is a research literature automation workflow built around Codex, Zotero, Zotero MCP, RSS feeds, PubMed/PMC retrieval, configurable screening rules, and report export.
 
-Typical flow:
+It is designed for researchers and teams who need to monitor new papers, filter noisy results, organize Zotero collections, collect feedback, and generate regular review reports.
 
-```text
-RSS / PubMed-PMC -> merge + dedup -> A/B/C/D triage -> Zotero MCP writeback -> title translation -> workbook/report export
-```
+> It does not replace research judgment. It automates the repetitive first pass and keeps the final decision with the researcher.
 
 ## Pain Points & Solutions
 
 | Pain point | What the workflow does |
 | --- | --- |
-| Manually scanning journals is slow | Collects RSS and PubMed/PMC results into one workflow |
-| Title and abstract screening is repetitive | Uses configurable rules and semantic review to grade papers |
-| Zotero collections require manual cleanup | Writes items into daily source and grade collections through Zotero MCP |
-| English-only titles slow review | Backfills Chinese title translations for A/B/C items |
-| User feedback is hard to preserve | Learns from review workbook feedback and long-lived screening standards |
-| Periodic reports are tedious | Exports daily review workbooks and biweekly summaries |
+| New papers are scattered across RSS, PubMed, and journal feeds. | Collects RSS and PubMed/PMC results into one workflow. |
+| Search results contain duplicates and low-value hits. | Deduplicates by DOI, PMID, PMCID, URL, and normalized title. |
+| Manual triage is repetitive and inconsistent. | Applies configurable A/B/C/D grading rules and keeps audit records. |
+| Zotero collections become messy over time. | Writes accepted items into structured Zotero collections through Zotero MCP. |
+| Feedback is hard to reuse. | Reads feedback and screening standards to refine future rules. |
 
 ## Core Features
 
-- **Dual retrieval channels**: RSS and PubMed/PMC are handled in parallel.
-- **Unified deduplication**: DOI, PMID/PMCID, URL, and normalized titles are used in priority order.
-- **A/B/C/D grading**: Rule-based grading and semantic review are both auditable.
-- **Zotero MCP writeback**: The workflow uses MCP tools and never edits the Zotero database directly.
-- **Feedback learning**: Review feedback and `screening_standards.md` become traceable preference evidence.
-- **Auditable outputs**: Stage reports record skip, degrade, and failure reasons.
-- **Public release layout**: Automation code and skills are separated for easier reuse and review.
+- Codex orchestration
+- RSS + PubMed/PMC
+- A/B/C/D triage
+- Zotero MCP writeback
+- Title translation
+- Feedback learning
+- Semantic review
+- Report export
 
 ## Quick Start with Codex
 
-1. Install Node.js 18 or newer.
-2. Install PowerShell 7 or newer.
-3. Install Zotero Desktop and make Zotero MCP available.
-4. Open the project in Codex and use `Automation` as the working directory.
-5. Copy `.env.example` to `.env` and fill in local values. Do not commit `.env`.
-6. Adapt public templates under `Automation/config/` to your research direction.
-
-Run the main workflow:
+1. Prepare Node.js 18+, PowerShell 7+, Zotero Desktop, Zotero MCP Plugin, and optional Ollama.
+2. Open the project in Codex and use `Automation` as the working directory.
+3. Ask Codex to read `Automation/AGENTS.md`, `Automation/README.md`, and `Skills/`.
+4. Copy `.env.example` to `.env` and fill in local values.
+5. Edit RSS, PubMed/PMC, grading, translation, and preference-learning configs under `config/`.
+6. Run the main entrypoint and ask Codex to report each stage result.
 
 ```powershell
 cd Automation
 node --env-file=.env tools/run_zotero_literature_filter.mjs
 ```
 
-## Validation
+## Paid Setup & Research Direction Packs
 
-```powershell
-cd Automation
-node --check tools/run_zotero_literature_filter.mjs
-node --test tests/*.test.mjs
-```
+The project is open source. You can download, modify, and run it yourself. Paid support is available for users who want to save setup time or adapt the workflow to a specific research direction.
 
-End-to-end execution depends on Zotero, Zotero MCP, external retrieval, and local API configuration. The public repository ships templates, not private runtime settings.
+### Paid installation & setup
+
+Dependency installation, `.env` setup, Zotero MCP checks, translation and preference-learning configuration, Codex automation setup, and first-run troubleshooting.
+
+### Research direction configuration pack
+
+RSS source selection, PubMed/PMC query design, A/B/C/D screening rules, translation settings, preference-learning settings, and automation checklist.
+
+## Support the Project
+
+If this project helps you, you can buy me a coffee or send a small appreciation to support continued maintenance.
+
+> Payment QR or support link placeholder.
+
+## Acknowledgements
+
+- **Zotero** - an excellent open-source reference manager.
+- **Zotero Style** - provides literature rating and star features.
+- **Zotero MCP Plugin** - provides MCP integration with Zotero.
+- **Codex** - AI coding assistant and the code generation tool used in this project.
+- **Ollama** - local language model service used for semantic review.
 
 ## License
 
