@@ -1,10 +1,14 @@
 # Zotero Med Pipeline
 
-一个基于 Codex 的科研文献自动化工作流，用于文献发现、筛选分级、Zotero 写回、标题翻译、偏好学习和报表生成。
+一个基于 Codex 构建的科研文献自动化工作流，让 Zotero + AI 帮你实现文献发现、筛选分级、Zotero 写回、标题翻译、偏好学习和报表生成。
 
 MIT License | Codex workflow | v1.3 update
 
-[快速开始](#接入-codex-创建自动化) | [付费配置服务](#付费安装配置与研究方向配置包) | [English](#english-version)
+[中文](#中文) | [English](#english-version)
+
+# 中文
+
+[快速开始](#接入-codex-创建自动化) | [付费配置服务](#付费安装配置与研究方向配置包)
 
 ## v1.3 update
 
@@ -13,9 +17,8 @@ v1.3 将项目整理为两个公开模块：**Automation** 和 **Skills**。前�
 | 更新方向 | 内容 |
 | --- | --- |
 | 稳定性与代码优化 | 优化核心工作流代码，减少自动化运行中潜在的报错；收敛重复能力，明确模块职责。 |
-| 筛选与语义能力 | 优化 A/B/C/D 分级规则、语义复审和 semantic search 接入，让筛选结果更稳定、更可审计。 |
+| 筛选与语义能力 | 优化 A/B/C/D 分级规则、语义复审，让筛选结果更稳定、更可审计。 |
 | 日报与反馈体验 | 优化日报格式，便于阅读、反馈、人工复核和后续偏好学习。 |
-| 公开发布整理 | 压缩文档、准备脱敏示例，降低理解成本，便于 GitHub 发布和复用。 |
 
 ## 这是什么？
 
@@ -89,9 +92,18 @@ node --env-file=.env tools/run_zotero_literature_filter.mjs
 读取 Automation/AGENTS.md，从 Automation 目录运行主工作流，按 Stage 1 到 Stage 4 汇报结果，并说明任何降级或失败原因。
 ```
 
+
+## 支持项目
+
+如果该项目帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。
+<img width="600" alt="c852b20ca26b99f8739606b28f92fed8" src="https://github.com/user-attachments/assets/a30216d0-9bde-4be5-8c9f-216b08ec3b98" />
+
+
 ## 付费安装配置与研究方向配置包
 
 本项目本身开源，你可以自由下载、修改和自部署。付费服务主要面向希望节省配置时间、快速落地工作流、或希望为特定研究方向准备筛选配置的人。
+
+需要可以联系    Email：g2269204031@163.com      小红书账号：278803432
 
 ### 付费安装配置服务
 
@@ -109,19 +121,13 @@ node --env-file=.env tools/run_zotero_literature_filter.mjs
 - A/B/C/D 筛选标准与分级规则配置
 - 翻译、偏好学习和自动化运行清单配置
 
-## 支持项目
-
-如果该项目帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。
-
-> 这里可放置你的收款码或赞赏链接。
-
 ## 致谢
 
-- **Zotero** - 优秀的开源文献管理工具。
-- **Zotero Style** - 提供文献评分和星标功能。
-- **Zotero MCP Plugin** - 提供与 Zotero 的 MCP 集成能力。
-- **Codex** - AI 编程助手，本项目的代码生成工具。
-- **Ollama** - 本地大语言模型服务，用于语义复审功能。
+- **[Zotero](https://www.zotero.org/)** - 优秀的开源文献管理工具。
+- **[Zotero Style](https://github.com/MuiseDestiny/zotero-style)** - 提供文献评分和星标功能。
+- **[Zotero MCP Plugin](https://github.com/cookjohn/zotero-mcp)** - 提供与 Zotero 的 MCP 集成能力。
+- **[Codex](https://github.com/openai/codex)** - AI 编程助手，本项目的代码生成工具。
+- **[Ollama](https://ollama.com/)** - 本地大语言模型服务，用于语义复审功能。
 
 ## License
 
@@ -198,6 +204,8 @@ node --env-file=.env tools/run_zotero_literature_filter.mjs
 
 The project is open source. You can download, modify, and run it yourself. Paid support is available for users who want to save setup time or adapt the workflow to a specific research direction.
 
+Email：g2269204031@163.com
+
 ### Paid installation & setup
 
 Dependency installation, `.env` setup, Zotero MCP checks, translation and preference-learning configuration, Codex automation setup, and first-run troubleshooting.
@@ -214,11 +222,11 @@ If this project helps you, you can buy me a coffee or send a small appreciation 
 
 ## Acknowledgements
 
-- **Zotero** - an excellent open-source reference manager.
-- **Zotero Style** - provides literature rating and star features.
-- **Zotero MCP Plugin** - provides MCP integration with Zotero.
-- **Codex** - AI coding assistant and the code generation tool used in this project.
-- **Ollama** - local language model service used for semantic review.
+- **[Zotero](https://www.zotero.org/)** - an excellent open-source reference manager.
+- **[Zotero Style](https://github.com/MuiseDestiny/zotero-style)** - provides literature rating and star features.
+- **[Zotero MCP Plugin](https://github.com/cookjohn/zotero-mcp)** - provides MCP integration with Zotero.
+- **[Codex](https://github.com/openai/codex)** - AI coding assistant and the code generation tool used in this project.
+- **[Ollama](https://ollama.com/)** - local language model service used for semantic review.
 
 ## License
 
