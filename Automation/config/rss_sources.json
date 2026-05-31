@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "description": "Public example RSS source list. Replace with your own open RSS feeds before running.",
+  "sources": [
+    {
+      "name": "Example Journal Feed",
+      "url": "https://example.org/journal/rss.xml",
+      "enabled": false
+    },
+    {
+      "name": "Example Publisher Feed",
+      "url": "https://example.org/publisher/latest.xml",
+      "enabled": false
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "model": "example-translation-model",
+  "temperature": 0.2,
+  "top_p": 0.95,
+  "stream": false,
+  "thinking": false,
+  "timeout_ms": 30000,
+  "max_retries": 2,
+  "batch_size": 10,
+  "fallback_to_english": true,
+  "rate_limit": {
+    "rpm": 100,
+    "tpm": 1000000
+  },
+  "prompt_file": "prompts/title_translation.md"
+}

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "description": "Public example PubMed/PMC search configuration. Replace placeholder terms before running.",
+  "databases": [
+    "pubmed"
+  ],
+  "days_back": 7,
+  "retmax": 300,
+  "sort": "date",
+  "datetype": "pdat",
+  "query": "(example biomedical topic) AND (example mechanism OR example outcome) NOT (example exclusion)",
+  "keyword_groups": {
+    "required": [
+      [
+        "example biomedical topic",
+        "sample exposure"
+      ],
+      [
+        "example mechanism",
+        "sample outcome"
+      ]
+    ],
+    "optional": [
+      "example method"
+    ],
+    "negative": [
+      "example exclusion"
+    ]
+  }
+}

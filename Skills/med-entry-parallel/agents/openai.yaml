@@ -1,0 +1,4 @@
+interface:
+  display_name: "med-entry-parallel"
+  short_description: "v1.3 update"
+  default_prompt: "Use this public med workflow skill."
