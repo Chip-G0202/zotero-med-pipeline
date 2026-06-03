@@ -54,7 +54,6 @@ v1.4 的重点是把项目往“长期可运行、可维护、可复用”的方
 ## 目录结构
 
 ```text
-v1.3/
 ├── README.md
 ├── LICENSE
 ├── Automation/
