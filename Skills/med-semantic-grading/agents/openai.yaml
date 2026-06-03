@@ -1,4 +1,4 @@
 interface:
   display_name: "med-semantic-grading"
-  short_description: "v1.3 update"
+  short_description: "v1.4 update"
   default_prompt: "Use this public med workflow skill."
