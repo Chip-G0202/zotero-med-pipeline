@@ -2,6 +2,7 @@
 // This script implements the current Stage 1 / primary pipeline logic.
 // It is not the recommended standalone entry point for end users.
 // The official daily entry point is tools/run_zotero_literature_filter.mjs.
+import "./lib/env_file_bootstrap.mjs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -21,7 +22,8 @@ import { evaluatePwshGate } from "./lib/pwsh_gate.mjs";
 import { buildRuntimeConfig } from "./lib/runtime_config.mjs";
 import { buildNcbiESearchUrl, loadPubMedPmcSearchConfig, loadRssSources, loadWorkflowRules } from "./lib/literature_config.mjs";
 import { buildMovePlan, scanFeedbackRows, scanLiteratureRecords } from "./archive_history_by_feedback.mjs";
-import { buildCorrectionPlan, enrichArchivePlanWithZoteroTitleMatches, readCollections } from "./zotero_feedback_collection_corrections.mjs";
+import { applyCorrectionPlan, buildCorrectionPlan, enrichArchivePlanWithZoteroTitleMatches, readCollections } from "./zotero_feedback_collection_corrections.mjs";
+import { buildZoteroCollectionGuard, summarizeCollectionScopeBlocks } from "./lib/zotero_collection_guard.mjs";
 
 const RUNTIME = buildRuntimeConfig();
 const ROOT = RUNTIME.projectRoot;
@@ -309,6 +311,8 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
     legacy_weekly_report_compat: true,
     export_root: REVIEW_ROOT,
     desktop_export_disabled: true,
+    feedback_item_actions_default_enabled: true,
+    manual_standard_evaluation_default_enabled: true,
   };
   const pubmedPmcConfigPath = path.join(ROOT, "config", "pubmed_pmc_search.json");
   report.steps.manual_standard_evaluation = await processManualStandardEvaluation({
@@ -316,6 +320,9 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
     pubmedConfigPath: pubmedPmcConfigPath,
     auditPath: path.join(pipeDir, "manual_standard_evaluation_audit.json"),
   });
+  report.manual_standard_evaluation_default_enabled = true;
+  report.manual_standard_evaluation_api_key_configured = Boolean(report.steps.manual_standard_evaluation?.llm_api_key_configured);
+  report.manual_standard_evaluation_api_key_source = report.steps.manual_standard_evaluation?.llm_api_key_source || "";
   report.steps.feedback_learning = loadPreviousFeedbackPrefs(now);
   const feedbackDiag = report.steps.feedback_learning?.diagnostics || {};
   report.steps.med_query_learning = {
@@ -325,8 +332,9 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
     feedback_files_checked: report.steps.feedback_learning?.checked_files || [],
     feedback_rows_count: Number(report.steps.feedback_learning?.rows_used || 0),
     feedback_used_for_item_actions: false,
-    feedback_item_actions_entry: "tools/zotero_feedback_collection_corrections.mjs (manual command only)",
-    feedback_item_actions_status: "not_executed_in_pipeline",
+    feedback_item_actions_default_enabled: true,
+    feedback_item_actions_entry: "tools/zotero_feedback_collection_corrections.mjs (default pipeline apply unless APPLY_FEEDBACK_ITEM_ACTIONS=false)",
+    feedback_item_actions_status: "not_attempted",
     feedback_used_for_rule_learning: false,
     previous_feedback_lookup_paths: feedbackDiag.lookup_paths || [],
     feedback_review_root: REVIEW_ROOT,
@@ -992,16 +1000,21 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
   }
   report.steps.standards_rule_suggestions = ruleSuggestionsReport;
 
-  // ─── Feedback Item Actions Dry-Run ───────────────────────────────────
-  const applyItemActions = /^(1|true|yes)$/i.test(String(process.env.APPLY_FEEDBACK_ITEM_ACTIONS || "false"));
+  // ─── Feedback Item Actions ───────────────────────────────────────────
+  // Default is apply; set APPLY_FEEDBACK_ITEM_ACTIONS=false only when you want a plan-only run.
+  const applyItemActions = /^(1|true|yes)$/i.test(String(process.env.APPLY_FEEDBACK_ITEM_ACTIONS ?? "true"));
   const feedbackItemActionsReport = {
     feedback_used_for_item_actions: false,
+    feedback_item_actions_default_enabled: true,
     feedback_item_actions_mode: applyItemActions ? "apply" : "dry_run",
     planned_actions_count: 0,
     executed_actions_count: 0,
     skipped_actions_count: 0,
     failed_actions_count: 0,
     feedback_item_actions_plan_path: "",
+    collection_scope_guard_enabled: true,
+    collection_scope_blocked_count: 0,
+    collection_scope_blocked_samples: [],
     status: "not_attempted",
   };
   try {
@@ -1030,15 +1043,43 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
           feedbackItemActionsReport.enrich_error = String(enrichErr?.message || enrichErr);
         }
         let collections = [];
+        let collectionGuard = null;
+        let collectionScopeBlocks = [];
         try {
           collections = await readCollections(mcpToolCall);
+          collectionGuard = buildZoteroCollectionGuard(collections);
+          Object.assign(feedbackItemActionsReport, collectionGuard.audit);
         } catch (collErr) {
           feedbackItemActionsReport.collections_fetch_error = String(collErr?.message || collErr);
         }
-        const correctionPlan = buildCorrectionPlan({ archivePlan, collections });
+        const correctionPlan = buildCorrectionPlan({
+          archivePlan,
+          collections,
+          dropMode: applyItemActions ? "quarantine" : "manual",
+          includeArchiveCleanup: false,
+          collectionGuard,
+          collectionScopeBlocks,
+        });
+        const collectionScopeSummary = summarizeCollectionScopeBlocks(collectionScopeBlocks);
+        feedbackItemActionsReport.collection_scope_blocked_count = collectionScopeSummary.collection_scope_blocked_count;
+        feedbackItemActionsReport.collection_scope_blocked_samples = collectionScopeSummary.collection_scope_blocked_samples;
         feedbackItemActionsReport.planned_correction_actions = correctionPlan.actions.filter((a) => a.status === "planned").length;
-        if (applyItemActions) {
-          feedbackItemActionsReport.executed_actions_count = correctionPlan.actions.filter((a) => a.status === "moved").length;
+        if (applyItemActions && !collectionGuard?.ready) {
+          feedbackItemActionsReport.status = "skipped_collection_guard_not_ready";
+          feedbackItemActionsReport.failed_actions_count = feedbackItemActionsReport.planned_correction_actions;
+        } else if (applyItemActions) {
+          await applyCorrectionPlan(correctionPlan, {
+            mcpToolCall,
+            applyMovesAndCleanup: true,
+            applyDropQuarantine: true,
+            collectionGuard,
+            collectionScopeBlocks,
+          });
+          Object.assign(feedbackItemActionsReport, summarizeCollectionScopeBlocks(collectionScopeBlocks));
+          feedbackItemActionsReport.executed_actions_count = [
+            ...correctionPlan.actions,
+            ...correctionPlan.cleanup_actions,
+          ].filter((a) => ["moved", "moved_to_delete_review", "deleted_collection_only"].includes(a.status)).length;
           feedbackItemActionsReport.status = "applied";
         } else {
           feedbackItemActionsReport.correction_plan_generated = true;
@@ -1048,8 +1089,12 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
         const planPath = path.join(pipeDir, "feedback_item_actions_plan.json");
         await fs.writeFile(planPath, JSON.stringify({
           mode: feedbackItemActionsReport.feedback_item_actions_mode,
+          feedback_item_actions_default_enabled: true,
+          include_archive_cleanup: false,
+          ...summarizeCollectionScopeBlocks(collectionScopeBlocks),
           planned_actions: archivePlan.filter((e) => e.status === "planned"),
           needs_review: archivePlan.filter((e) => e.status === "needs_review" || e.status === "conflict"),
+          correction_plan: correctionPlan,
           generated_at: report.started_at,
         }, null, 2), "utf8");
         feedbackItemActionsReport.feedback_item_actions_plan_path = planPath;
@@ -1065,8 +1110,11 @@ export async function runResearchOsPipeline({ argv = process.argv } = {}) {
   }
   report.steps.feedback_item_actions = feedbackItemActionsReport;
   report.steps.med_query_learning.feedback_used_for_item_actions = feedbackItemActionsReport.feedback_used_for_item_actions;
+  report.steps.med_query_learning.feedback_item_actions_default_enabled = true;
   report.steps.med_query_learning.feedback_item_actions_mode = feedbackItemActionsReport.feedback_item_actions_mode;
   report.steps.med_query_learning.feedback_item_actions_status = feedbackItemActionsReport.status;
+  report.collection_scope_blocked_count = Number(feedbackItemActionsReport.collection_scope_blocked_count || 0);
+  report.collection_scope_blocked_samples = feedbackItemActionsReport.collection_scope_blocked_samples || [];
 
   const translationCache = await loadTranslationCache(RUNTIME.translationCachePath);
   const writebackReadyRaw = buildWritebackReadyItems(triagedAll, { translationCache });

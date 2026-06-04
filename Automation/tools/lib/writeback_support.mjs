@@ -184,6 +184,8 @@ export async function attachItemsByCollectionBatched({
   batchSize = 50,
   mcpToolCall,
   idBase = 800000,
+  collectionGuard = null,
+  collectionScopeBlocks = null,
 }) {
   const attachStats = {
     collection_attach_mode: "batch",
@@ -195,6 +197,28 @@ export async function attachItemsByCollectionBatched({
 
   let callOffset = 0;
   for (const [collectionKey, keySet] of (groupedItemKeys || new Map()).entries()) {
+    if (collectionGuard) {
+      const check = collectionGuard.checkCollectionKey(collectionKey, { action: "add_items_to_collection", role: "target" });
+      if (!check.ok) {
+        const keys = [...keySet];
+        const block = {
+          status: "collection_scope_blocked",
+          action: "add_items_to_collection",
+          role: "target",
+          collection_key: collectionKey,
+          collection_name: check.collectionName || "",
+          itemKeys: keys,
+          reason: check.reason,
+        };
+        if (Array.isArray(collectionScopeBlocks)) collectionScopeBlocks.push(block);
+        attachStats.collection_attach_failures.push({
+          collectionKey,
+          itemKeys: keys,
+          error: `collection_scope_blocked:${check.reason}`,
+        });
+        continue;
+      }
+    }
     const keys = [...keySet];
     for (let i = 0; i < keys.length; i += batchSize) {
       const batch = keys.slice(i, i + batchSize);

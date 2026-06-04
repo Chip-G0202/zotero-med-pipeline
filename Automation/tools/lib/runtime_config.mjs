@@ -36,7 +36,7 @@ function defaultProjectRoot() {
 
 function defaultZoteroExe() {
   if (process.platform === "darwin") return "/Applications/Zotero.app/Contents/MacOS/zotero";
-  if (process.platform === "win32") return "zotero.exe";
+  if (process.platform === "win32") return "D:/Zotero/zotero.exe";
   return "zotero";
 }
 

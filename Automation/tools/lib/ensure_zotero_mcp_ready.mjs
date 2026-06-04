@@ -1,13 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const DEFAULT_MCP_URL = "http://127.0.0.1:23120/mcp";
-const DEFAULT_POST_START_DELAY_MS = 3000;
-const DEFAULT_RETRIES = 10;
-const DEFAULT_INTERVAL_MS = 1000;
-const SCHEDULED_TASK_NAME = "StartZoteroForCodexOnly";
-const DESKTOP_COMMANDER_FIXED_COMMAND = `schtasks /Run /TN ${SCHEDULED_TASK_NAME}`;
+const DEFAULT_POST_START_DELAY_MS = 5000;
+const DEFAULT_RETRIES = 15;
+const DEFAULT_INTERVAL_MS = 2000;
 const EXTERNAL_LAUNCHER_DESKTOP_COMMANDER = "desktop_commander";
 
 function toPosix(p) {
@@ -32,29 +30,9 @@ function parsePositiveInt(raw, fallback) {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 }
 
-function isPermissionDeniedText(msg) {
-  const s = String(msg || "").toLowerCase();
-  return s.includes("eperm") || s.includes("access is denied") || s.includes("permission denied") || s.includes("operation not permitted");
-}
-
 function trunc(s, max = 300) {
   const v = String(s || "").trim();
   return v.length <= max ? v : `${v.slice(0, max)}...`;
-}
-
-function sanitizeSpawnResult(method, command, result) {
-  return {
-    method,
-    command,
-    success: result?.status === 0,
-    errno: result?.error?.errno ?? null,
-    code: result?.error?.code ?? null,
-    syscall: result?.error?.syscall ?? null,
-    exitCode: result?.status ?? null,
-    stderr: trunc(result?.stderr),
-    stdout: trunc(result?.stdout),
-    signal: result?.signal ?? null,
-  };
 }
 
 function makeError(code, message, details) {
@@ -68,25 +46,15 @@ function isWindowsPlatform() {
   return process.platform === "win32";
 }
 
-function platformName() {
-  return process.platform;
-}
-
 function defaultZoteroExePath() {
-  if (isWindowsPlatform()) return "zotero.exe";
+  if (isWindowsPlatform()) return "D:/Zotero/zotero.exe";
   if (process.platform === "darwin") return "/Applications/Zotero.app/Contents/MacOS/zotero";
   return "zotero";
 }
 
-function platformProcessCheckStrategy() {
-  if (isWindowsPlatform()) return "tasklist+powershell";
-  if (process.platform === "darwin") return "pgrep+ps";
-  return "pgrep+ps";
-}
-
 function platformLaunchStrategy() {
-  if (isWindowsPlatform()) return "powershell_start_process";
-  if (process.platform === "darwin") return "open_macos";
+  if (isWindowsPlatform()) return "node_spawn";
+  if (process.platform === "darwin") return "open_macos+node_spawn";
   return "node_spawn";
 }
 
@@ -125,117 +93,39 @@ function getExternalLauncherMode() {
   return String(process.env.ZOTERO_EXTERNAL_LAUNCHER || "").trim().toLowerCase();
 }
 
-function runPowerShellProbe(exe) {
-  const script = "$p = Get-Process -Name zotero -ErrorAction SilentlyContinue; if ($p) { 'running' } else { 'stopped' }";
-  const result = spawnSync(exe, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8" });
-  const base = sanitizeSpawnResult(`process_check_${exe}`, `${exe} Get-Process zotero`, result);
-  const out = String(result.stdout || "").trim().toLowerCase();
-  if (out === "running") return { ok: true, running: true, method: exe, error: null, raw: base };
-  if (out === "stopped") return { ok: true, running: false, method: exe, error: null, raw: base };
-  return {
-    ok: false,
-    running: null,
-    method: exe,
-    error: result.error ? String(result.error) : (base.stderr || base.stdout || "unknown"),
-    raw: base,
-  };
-}
-
-function runTasklistProbe() {
-  const result = spawnSync("tasklist", ["/FI", "IMAGENAME eq zotero.exe"], { encoding: "utf8" });
-  const base = sanitizeSpawnResult("process_check_tasklist", "tasklist /FI IMAGENAME eq zotero.exe", result);
-  const txt = `${result.stdout || ""}\n${result.stderr || ""}`.toLowerCase();
-  if (txt.includes("zotero.exe")) return { ok: true, running: true, method: "tasklist", error: null, raw: base };
-  if (txt.includes("no tasks are running") || txt.includes("没有运行的任务")) {
-    return { ok: true, running: false, method: "tasklist", error: null, raw: base };
+/**
+ * MCP HTTP probe — the ONLY process detection method.
+ * No system binary spawning; works in any sandbox.
+ */
+async function mcpProbeHttp(mcpUrl, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(mcpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "probe", version: "1.0" } } }),
+      signal: controller.signal,
+    });
+    if (res.ok) return { ok: true, status: res.status };
+    return { ok: false, status: res.status, error: `HTTP ${res.status}` };
+  } catch (e) {
+    return { ok: false, status: null, error: String(e?.message || e) };
+  } finally {
+    clearTimeout(timer);
   }
-  return {
-    ok: false,
-    running: null,
-    method: "tasklist",
-    error: result.error ? String(result.error) : (base.stderr || base.stdout || "unknown"),
-    raw: base,
-  };
-}
-
-function runMacPsProbe() {
-  const result = spawnSync("ps", ["-A", "-o", "comm="], { encoding: "utf8" });
-  const base = sanitizeSpawnResult("process_check_ps_macos", "ps -A -o comm=", result);
-  const txt = `\n${result.stdout || ""}\n${result.stderr || ""}\n`.toLowerCase();
-  const macOsMarkers = ["zotero", "/contents/macos/zotero"];
-  const running = macOsMarkers.some((marker) => txt.includes(marker));
-
-  if (result.status === 0) {
-    return { ok: true, running, method: "ps_macos", error: null, raw: base };
-  }
-
-  return {
-    ok: false,
-    running: null,
-    method: "ps_macos",
-    error: result.error ? String(result.error) : (base.stderr || base.stdout || "unknown"),
-    raw: base,
-  };
-}
-
-function detectProcessWithFallback(diagnostics) {
-  const methods = isWindowsPlatform()
-    ? [
-        () => runTasklistProbe(),
-        () => runPowerShellProbe("powershell.exe"),
-        () => runPowerShellProbe("pwsh"),
-      ]
-    : [
-        () => runMacPsProbe(),
-        () => runPowerShellProbe("pwsh"),
-      ];
-  let firstPermError = null;
-  for (const run of methods) {
-    const r = run();
-    diagnostics.processChecks.push(r.raw);
-    if (r.ok) {
-      diagnostics.processCheckAvailable = true;
-      diagnostics.processCheckMethod = r.method;
-      diagnostics.processCheckError = null;
-      return { available: true, running: r.running, blocked: false };
-    }
-    if (isPermissionDeniedText(r.error)) {
-      firstPermError = firstPermError || r.error;
-      continue;
-    }
-  }
-
-  if (firstPermError) {
-    diagnostics.processCheckAvailable = false;
-    diagnostics.processCheckMethod = "none";
-    diagnostics.processCheckError = firstPermError;
-    return { available: false, running: null, blocked: true };
-  }
-
-  const errText = diagnostics.processChecks.map((x) => `${x.method}:${x.stderr || x.stdout || x.code || "unknown"}`).join(" | ");
-  diagnostics.processCheckAvailable = false;
-  diagnostics.processCheckMethod = "none";
-  diagnostics.processCheckError = errText || "process detection failed";
-  return { available: false, running: null, blocked: false };
-}
-
-function quoteForPowerShell(s) {
-  return `'${String(s || "").replace(/'/g, "''")}'`;
-}
-
-function startWithPowerShell(exe, zoteroExe, workingDirectory) {
-  const script = `Start-Process -FilePath ${quoteForPowerShell(zoteroExe)} -WorkingDirectory ${quoteForPowerShell(workingDirectory)}`;
-  const result = spawnSync(exe, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { encoding: "utf8" });
-  return sanitizeSpawnResult(`launch_${exe}`, `${exe} Start-Process <zotero>`, result);
 }
 
 function startWithMacOpen(zoteroExe) {
   const isAppBundle = zoteroExe.toLowerCase().endsWith(".app") || zoteroExe.includes("/Zotero.app");
   const args = isAppBundle ? ["-a", zoteroExe] : ["-a", "Zotero"];
-  const command = `open ${args.join(" ")}`;
-  const result = spawnSync("open", args, { encoding: "utf8" });
-  const base = sanitizeSpawnResult("launch_open_macos", command, result);
-  return { ...base, success: base.success || result?.status === 0 };
+  try {
+    const child = spawn("open", args, { detached: true, stdio: "ignore" });
+    child.unref();
+    return { method: "open_macos", command: `open ${args.join(" ")}`, success: true };
+  } catch (error) {
+    return { method: "open_macos", command: `open ${args.join(" ")}`, success: false, error: String(error) };
+  }
 }
 
 async function startWithNodeSpawn(zoteroExe, workingDirectory) {
@@ -303,75 +193,32 @@ async function startWithNodeSpawn(zoteroExe, workingDirectory) {
   });
 }
 
-function allLaunchAttemptsPermissionDenied(attempts) {
-  return attempts.length > 0 && attempts.every((a) => {
-    const marker = `${a.code || ""} ${a.stderr || ""} ${a.stdout || ""}`;
-    return isPermissionDeniedText(marker);
-  });
-}
-
-function defaultMcpProbe(mcpUrl) {
-  return async function probe(attempt) {
-    const res = await fetch(mcpUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 800000 + attempt,
-        method: "tools/call",
-        params: { name: "get_collections", arguments: { mode: "minimal", limit: 1 } },
-      }),
-    });
-    const json = await res.json();
-    if (json.error) {
-      throw new Error(`MCP get_collections failed: ${JSON.stringify(json.error)}`);
-    }
-  };
-}
-
 export async function ensureZoteroMcpReady({
-  mcpProbe,
-  retries = parsePositiveInt(process.env.ZOTERO_MCP_READY_RETRIES, DEFAULT_RETRIES),
-  intervalMs = parsePositiveInt(process.env.ZOTERO_MCP_READY_INTERVAL_MS, DEFAULT_INTERVAL_MS),
-  postStartDelayMs = DEFAULT_POST_START_DELAY_MS,
+  retries = parsePositiveInt(process.env.ZOTERO_MCP_RETRIES, DEFAULT_RETRIES),
+  intervalMs = parsePositiveInt(process.env.ZOTERO_MCP_INTERVAL_MS, DEFAULT_INTERVAL_MS),
+  postStartDelayMs = parsePositiveInt(process.env.ZOTERO_MCP_POST_START_DELAY_MS, DEFAULT_POST_START_DELAY_MS),
   log = console.log,
+  mcpProbe: mcpProbeTopLevel,    // backward-compat: some callers pass mcpProbe at top level
   dependencies = {},
 } = {}) {
-  if (typeof mcpProbe !== "function") {
-    mcpProbe = defaultMcpProbe(getMcpUrl());
-  }
-
-  const resolveZoteroExeFn = dependencies.resolveZoteroExe || resolveZoteroExe;
-  const getExternalLauncherModeFn = dependencies.getExternalLauncherMode || getExternalLauncherMode;
-  const detectProcessWithFallbackFn = dependencies.detectProcessWithFallback || detectProcessWithFallback;
-  const startWithPowerShellFn = dependencies.startWithPowerShell || startWithPowerShell;
-  const startWithMacOpenFn = dependencies.startWithMacOpen || startWithMacOpen;
-  const startWithNodeSpawnFn = dependencies.startWithNodeSpawn || startWithNodeSpawn;
-  const allLaunchAttemptsPermissionDeniedFn = dependencies.allLaunchAttemptsPermissionDenied || allLaunchAttemptsPermissionDenied;
-  const makeErrorFn = dependencies.makeError || makeError;
-
-  const resolved = resolveZoteroExeFn();
+  const mcpUrl = dependencies.mcpUrl || getMcpUrl();
+  const mcpProbeFn = mcpProbeTopLevel || dependencies.mcpProbe || ((attempt) => mcpProbeHttp(mcpUrl));
+  const resolved = dependencies.resolvedZoteroExe || resolveZoteroExe();
   const zoteroExe = resolved.path;
-  const workingDirectory = toPosix(path.dirname(zoteroExe));
-  const mcpUrl = getMcpUrl();
+  const workingDirectory = dependencies.workingDirectory || path.dirname(zoteroExe);
+  const getExternalLauncherModeFn = dependencies.getExternalLauncherMode || getExternalLauncherMode;
+  const startWithNodeSpawnFn = dependencies.startWithNodeSpawn || startWithNodeSpawn;
+  const startWithMacOpenFn = dependencies.startWithMacOpen || startWithMacOpen;
+  const makeErrorFn = dependencies.makeError || makeError;
+  const waitFn = dependencies.wait || wait;
+
   const diagnostics = {
-    platform: platformName(),
-    launchMode: "local_fallback_only",
-    expectedExternalLauncher: "desktop_commander",
-    expectedLauncherTool: "mcp__desktop_commander__.start_process",
-    expectedLauncherCommand: DESKTOP_COMMANDER_FIXED_COMMAND,
-    scheduledTaskName: SCHEDULED_TASK_NAME,
-    zoteroExe,
-    zoteroExeSource: resolved.source,
-    processCheckStrategy: platformProcessCheckStrategy(),
-    launchStrategy: platformLaunchStrategy(),
-    workingDirectory,
     mcpUrl,
+    launchStrategy: platformLaunchStrategy(),
     initialMcpReady: false,
-    processCheckAvailable: null,
-    processCheckMethod: null,
+    launchMode: null,
+    launchMethod: null,
     processCheckError: null,
-    processChecks: [],
     wasZoteroAlreadyRunning: null,
     launchAttempted: false,
     launchMethodsTried: [],
@@ -386,15 +233,17 @@ export async function ensureZoteroMcpReady({
     diagnostics.launchMode = "external_launcher_only";
   }
 
+  // Phase 1: MCP HTTP probe (the only process detection)
   try {
-    await mcpProbe(0);
+    await mcpProbeFn(0);
     diagnostics.initialMcpReady = true;
     diagnostics.postLaunchMcpReady = true;
+    diagnostics.wasZoteroAlreadyRunning = true;
     return {
       ok: true,
       attempts: 1,
       started_now: false,
-      was_running: null,
+      was_running: true,
       wait_after_start_ms: 0,
       diagnostics,
     };
@@ -415,113 +264,71 @@ export async function ensureZoteroMcpReady({
 
   if (!resolved.exists) {
     const suggestion = isWindowsPlatform()
-      ? "Set ZOTERO_EXE to the installed Zotero executable path, for example zotero.exe."
+      ? "Set ZOTERO_EXE to the installed Zotero executable path, for example D:/Zotero/zotero.exe."
       : "Set ZOTERO_EXE to the installed Zotero executable path, for example /Applications/Zotero.app/Contents/MacOS/zotero.";
     throw makeErrorFn("ZOTERO_EXE_NOT_FOUND", `zotero executable not found at ${zoteroExe}. ${suggestion}`, diagnostics);
   }
 
-  const processState = detectProcessWithFallbackFn(diagnostics);
-  if (!processState.available && !processState.blocked) {
-    throw makeErrorFn("ZOTERO_PROCESS_DETECTION_FAILED", diagnostics.processCheckError || "unknown process detection failure", diagnostics);
-  }
-  if (processState.blocked) {
-    log(`Process check blocked by permission policy: ${diagnostics.processCheckError}`);
-  }
-  diagnostics.wasZoteroAlreadyRunning = processState.running;
+  // Phase 2: Launch Zotero (skip process detection — go directly to launch)
+  diagnostics.launchAttempted = true;
+  diagnostics.wasZoteroAlreadyRunning = false;
+  const attempts = [];
 
-  let startedNow = false;
-  if (!processState.available || processState.running !== true) {
-    diagnostics.launchAttempted = true;
-    const attempts = [];
-
-    if (isWindowsPlatform()) {
-      diagnostics.fallbackUsed = true;
-      diagnostics.fallbackMethod = "powershell.exe";
-      attempts.push(startWithPowerShellFn("powershell.exe", zoteroExe, workingDirectory));
-    } else {
-      diagnostics.fallbackUsed = true;
-      diagnostics.fallbackMethod = "open_macos";
-      attempts.push(startWithMacOpenFn(zoteroExe));
-    }
-
+  if (isWindowsPlatform()) {
+    // Windows: node spawn is the only reliable method in sandbox environments
+    diagnostics.fallbackUsed = true;
+    diagnostics.fallbackMethod = "node_spawn";
+    attempts.push(await startWithNodeSpawnFn(zoteroExe, workingDirectory));
+  } else if (process.platform === "darwin") {
+    diagnostics.fallbackUsed = true;
+    diagnostics.fallbackMethod = "open_macos";
+    attempts.push(startWithMacOpenFn(zoteroExe));
     if (!attempts.some((a) => a.success)) {
-      diagnostics.fallbackUsed = true;
       diagnostics.fallbackMethod = "node_spawn";
       attempts.push(await startWithNodeSpawnFn(zoteroExe, workingDirectory));
     }
-    if (!attempts.some((a) => a.success)) {
-      diagnostics.fallbackMethod = attempts[attempts.length - 1]?.method || diagnostics.fallbackMethod;
-    }
-
-    diagnostics.launchMethodsTried = attempts;
-
-    const successAttempt = attempts.find((a) => a.success);
-    if (!successAttempt) {
-      if (allLaunchAttemptsPermissionDeniedFn(attempts)) {
-        if (processState.blocked) {
-          throw makeErrorFn(
-            "CODEX_PERMISSION_INSUFFICIENT_FOR_ZOTERO_LAUNCH",
-            "launch denied and process check also permission-blocked",
-            {
-              ...diagnostics,
-              processCheckError: diagnostics.processCheckError || "EPERM",
-            },
-          );
-        }
-        throw makeErrorFn("CODEX_PERMISSION_INSUFFICIENT_FOR_ZOTERO_LAUNCH", "all launch methods denied by permission policy", diagnostics);
-      }
-      throw makeErrorFn("ZOTERO_LAUNCH_COMMAND_FAILED", "all launch methods failed", diagnostics);
-    }
-
-    startedNow = true;
-    diagnostics.waitAfterLaunchMs = postStartDelayMs;
-    log(`Waiting ${postStartDelayMs}ms for Zotero MCP plugin to load...`);
-    await wait(postStartDelayMs);
+  } else {
+    diagnostics.fallbackUsed = true;
+    diagnostics.fallbackMethod = "node_spawn";
+    attempts.push(await startWithNodeSpawnFn(zoteroExe, workingDirectory));
   }
 
+  diagnostics.launchMethodsTried = attempts;
+
+  const successAttempt = attempts.find((a) => a.success);
+  if (!successAttempt) {
+    throw makeErrorFn("ZOTERO_LAUNCH_COMMAND_FAILED", "all launch methods failed", diagnostics);
+  }
+
+  diagnostics.waitAfterLaunchMs = postStartDelayMs;
+  log(`Waiting ${postStartDelayMs}ms for Zotero MCP plugin to load...`);
+  await waitFn(postStartDelayMs);
+
+  // Phase 3: Poll MCP HTTP endpoint until ready
   let lastErr = null;
   for (let i = 1; i <= retries; i += 1) {
     try {
-      await mcpProbe(i);
+      await mcpProbeFn(i);
       diagnostics.postLaunchMcpReady = true;
       return {
         ok: true,
         attempts: i,
-        started_now: startedNow,
-        was_running: diagnostics.wasZoteroAlreadyRunning,
+        started_now: true,
+        was_running: false,
         wait_after_start_ms: diagnostics.waitAfterLaunchMs,
         diagnostics,
       };
     } catch (err) {
       lastErr = err;
       diagnostics.lastProbeError = String(err?.message || err);
-      if (i < retries) await wait(intervalMs);
+      if (i < retries) await waitFn(intervalMs);
     }
   }
 
-  const postProcess = detectProcessWithFallbackFn(diagnostics);
-  if (!postProcess.available && postProcess.blocked) {
-    throw makeErrorFn(
-      "MCP_NOT_READY_AFTER_ZOTERO_START",
-      "mcp not ready and process detection unavailable due to EPERM",
-      diagnostics,
-    );
-  }
-  if (postProcess.available && postProcess.running === true) {
-    const code = startedNow ? "MCP_NOT_READY_AFTER_ZOTERO_START" : "MCP_NOT_READY_WITH_RUNNING_ZOTERO";
-    throw makeErrorFn(code, "zotero running but mcp not ready", diagnostics);
-  }
-  if (postProcess.available && postProcess.running === false) {
-    throw makeErrorFn("ZOTERO_STARTED_BUT_NOT_RUNNING", "launch command returned but process not running after wait", diagnostics);
-  }
-
-  if (postProcess.blocked) {
-    throw makeErrorFn("CODEX_PERMISSION_INSUFFICIENT_FOR_PROCESS_CHECK", diagnostics.processCheckError || "process check denied", diagnostics);
-  }
-
+  // MCP never came online after launch + retries
   throw makeErrorFn(
-    startedNow ? "MCP_NOT_READY_AFTER_ZOTERO_START" : "MCP_NOT_READY_WITH_RUNNING_ZOTERO",
-    String(lastErr?.message || lastErr || "mcp probe failed"),
+    "MCP_NOT_READY_AFTER_ZOTERO_START",
+    `mcp not ready after ${retries} retries (${retries * intervalMs}ms)`,
     diagnostics,
   );
 }

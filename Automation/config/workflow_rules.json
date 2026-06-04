@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "description": "Public example literature triage rules. Replace placeholder terms with your own project scope.",
+  "description": "文献分级规则。主分级由人工定义的研究范围、机制深度、模型类型和排除规则决定；检索关键词只作为证据，不直接决定等级；feedback 只用于边界样本的轻量校准。长期筛选标准仍以 research_os/文献评价/screening_standards.md 为准。",
   "triage": {
-    "version": "public-v1.3-example",
+    "version": "2026-05-28-v2-mechanism-focused",
     "labels": {
       "A": "A课题相关",
       "B": "B专题相关",
@@ -16,144 +16,323 @@
       "other": "other"
     },
     "research_focus": {
-      "primary_question": "Placeholder biomedical literature triage scope for public release.",
+      "primary_question": "关注环境暴露或污染物，尤其是 TPHP、Triphenyl phosphate、OPFR/OPE 等，与神经毒性、神经炎症、小胶质细胞、脑区损伤、补体系统或相关神经免疫机制之间的关系。",
       "preferred_evidence": [
         "mechanism study",
         "animal study",
         "in vitro study",
-        "clinical study with mechanistic rationale"
+        "cell experiment",
+        "mammalian disease model",
+        "mouse model",
+        "rat model",
+        "microglia",
+        "neuroinflammation",
+        "neurotoxicity",
+        "neuron-glia interaction",
+        "synaptic regulation",
+        "complement system",
+        "gut-brain axis",
+        "microbiome mechanism",
+        "multi-omics with experimental validation"
       ],
       "core_exposure_terms": [
-        "example exposure",
-        "sample intervention",
-        "biomedical factor"
+        "TPHP",
+        "Triphenyl phosphate",
+        "OPFR",
+        "OPE",
+        "organophosphate flame retardant",
+        "pollutant",
+        "pollution",
+        "environmental exposure",
+        "toxicant",
+        "toxic exposure"
       ],
       "core_biology_terms": [
-        "example mechanism",
-        "sample pathway",
-        "example outcome"
+        "neurotoxicity",
+        "microglia",
+        "neuroinflammation",
+        "brain",
+        "hippocampus",
+        "complement",
+        "neuron",
+        "glia",
+        "synapse",
+        "neuroimmune",
+        "oxidative stress",
+        "mitochondria",
+        "blood-brain barrier",
+        "gut-brain axis",
+        "microbiome"
       ],
       "mechanism_terms": [
         "mechanism",
         "pathway",
         "signaling",
-        "model",
-        "experimental validation"
+        "axis",
+        "in vitro",
+        "animal model",
+        "cell model",
+        "functional validation",
+        "experimental validation",
+        "transcriptomics",
+        "proteomics",
+        "metabolomics",
+        "single-cell",
+        "spatial omics",
+        "multi-omics",
+        "integrated omics"
       ]
     },
     "priority_rules": {
       "strongly_prioritize": [
-        "Mechanistic or experimentally validated studies within the configured scope."
+        "动物实验，尤其是小鼠、大鼠等哺乳动物疾病模型",
+        "体外实验、细胞实验、机制研究和基础机制研究",
+        "神经生物学、神经炎症、小胶质细胞、神经元-胶质细胞相互作用、突触调控或神经系统通路研究",
+        "补体系统、补体激活、补体介导的神经炎症、免疫调控或神经免疫相互作用研究",
+        "肠道菌群、微生物组、宿主-微生物相互作用、代谢、免疫调控或肠-脑轴研究，前提是具有机制解释或实验验证",
+        "多组学机制研究，尤其是与疾病机制相关并有实验或功能验证支持的研究",
+        "机制深度强、生物学信息量高、具有广泛可转化意义的基础机制研究，即使不完全属于神经领域"
       ],
       "downgrade": [
-        "Broadly related observational or descriptive studies without clear scope match."
+        "缺乏机制深度的人群队列研究、流行病学关联研究、大型观察性结局研究或纯临床结局研究",
+        "以肾脏为中心的临床结局研究，除非直接关联更广泛的机制问题",
+        "植物生物学、植物组学或植物机制研究，除非具有直接生物医学机制相关性或疾病相关性",
+        "斑马鱼以外的非哺乳动物单一模型研究，除非机制洞见特别突出",
+        "缺乏细胞验证、动物建模、功能实验或机制解释的描述性临床研究",
+        "缺乏功能验证或机制解释的大规模组学关联研究",
+        "没有可迁移机制相关性的非医学或无关疾病背景研究",
+        "工程导向研究，除非具有明确生物医学机制可解释性或疾病相关性"
       ],
       "strict_exclude": [
-        "Records outside the configured biomedical scope or without usable metadata."
+        "污染物降解、污染物去除、污染物转移、污染物累积、污染特征分析、环境监测或环境分析导向研究",
+        "缺乏直接生物医学机制相关性的纯工程、计算工程、材料科学、物理学、电子、机械工程或工业技术研究",
+        "没有实质性生物学或疾病机制洞见的纯 AI、算法、工具开发或理论建模论文",
+        "植物相关研究，除非具有直接生物医学机制相关性或疾病相关性",
+        "昆虫、线虫、酵母等非哺乳动物模型研究，若缺乏突出机制洞见或可迁移性",
+        "癌症、肿瘤、病毒等范围外主题，除非直接服务当前关注的神经免疫、污染物毒性或可迁移机制问题"
       ]
     },
     "grading_rules": {
       "A": {
-        "definition": "Directly matches the configured core scope and contains strong evidence.",
-        "typical_cases": [
-          "Configured topic plus configured mechanism with validation."
+        "definition": "直接命中当前核心研究方向，且具有明确机制深度或实验验证价值。通常同时涉及目标暴露或污染物，以及神经毒性、神经炎症、小胶质细胞、补体、脑区损伤、神经免疫或相关机制。",
+        "required_features": [
+          "与核心暴露或污染物方向直接相关，或对污染物神经毒性机制具有高度可迁移价值",
+          "与神经系统、神经炎症、小胶质细胞、补体、脑区损伤、神经免疫、肠-脑轴或相关机制直接相关",
+          "具有动物实验、细胞实验、机制实验、功能验证、多组学机制验证中的至少一种强证据"
         ],
-        "action": "Prioritize for close reading."
+        "typical_cases": [
+          "TPHP、OPFR/OPE 或相关环境暴露导致神经炎症、小胶质细胞激活、补体改变、突触损伤或脑区病理改变的机制研究",
+          "小鼠、大鼠或细胞模型中研究污染物暴露与神经毒性机制的论文",
+          "多组学发现并通过实验验证神经毒性、免疫调控或补体相关机制的研究",
+          "虽非污染物主题，但对小胶质细胞、补体、神经炎症、肠-脑轴或神经免疫机制有强机制洞见且可迁移到当前课题"
+        ],
+        "action": "优先精读，进入重点文献库，必要时提取机制图、模型、关键通路和可复现实验设计。"
       },
       "B": {
-        "definition": "Clearly related to the configured topic or mechanism but not fully core.",
+        "definition": "与当前专题明显相关，但不是完全核心。可能只命中暴露因素或神经机制之一，或机制深度中等，可作为背景、相邻机制、方法或假设来源。",
         "typical_cases": [
-          "Adjacent topic or useful method/background."
+          "污染物或环境暴露相关，但神经、小胶质细胞、补体或机制证据不够直接",
+          "神经炎症、小胶质细胞、补体、肠-脑轴或多组学机制相关，但不涉及目标污染物",
+          "斑马鱼机制研究，若与神经毒性或污染物暴露有一定相关性",
+          "人群研究或临床研究中包含较清楚的生物学解释、机制线索或可转化假设",
+          "多组学研究有一定机制提示，但缺乏充分功能验证"
         ],
-        "action": "Keep as supporting literature."
+        "action": "保留，作为专题背景、机制推断、方法借鉴或综述材料。"
       },
       "C": {
-        "definition": "Broad field relevance with low short-term priority.",
+        "definition": "属于大领域背景，但距离当前核心课题较远。通常只有宽泛相关性，机制深度不足，或只提供低优先级背景信息。",
         "typical_cases": [
-          "General background only."
+          "普通环境健康、毒理学、神经科学或免疫学背景研究，但与目标暴露和核心机制距离较远",
+          "纯观察性人群队列、流行病学关联或临床结局研究，且缺乏机制解释",
+          "描述性组学研究，缺乏功能验证或明确机制结论",
+          "非神经领域机制研究，虽有一定生物学信息，但可迁移性不明确",
+          "肾脏、肝脏、代谢或其他系统结局研究，除非机制能明显迁移到当前问题"
         ],
-        "action": "Keep for audit or later background review."
+        "action": "低优先级保留，仅在写背景、扩展综述或追踪边界主题时查看。"
       },
       "D": {
-        "definition": "Outside the configured scope.",
+        "definition": "与当前课题、专题和领域相关性不足，或命中严格排除条件。关键词偶然命中不能避免 D。",
         "typical_cases": [
-          "Unrelated topic or excluded record type."
+          "污染物降解、去除、转移、累积、监测、检测、环境分析或污染特征分析研究",
+          "纯工程、材料、物理、电子、机械、工业、算法或工具开发研究，且没有生物医学机制洞见",
+          "植物研究、昆虫模型或其他范围外模型，且没有直接疾病机制或可迁移机制价值",
+          "癌症、肿瘤、病毒等范围外主题，且不能支持当前神经毒性或神经免疫机制问题",
+          "只因标题或摘要出现 pollutant、exposure、brain、omics 等词而被检出，但实际研究问题不相关"
         ],
-        "action": "Audit only."
+        "action": "不进入阅读队列，仅保留审计记录。"
       }
     },
     "decision_process": [
-      "Check exclusions first.",
-      "Evaluate configured topic match.",
-      "Evaluate evidence strength.",
-      "Assign A/B/C/D conservatively."
+      "第一步：先检查 strict_exclude。若文献属于污染物降解、去除、环境分析、纯工程、纯算法、植物或其他明确排除主题，且没有直接生物医学机制价值，标为 D。",
+      "第二步：判断是否具有核心暴露相关性。重点看 TPHP、Triphenyl phosphate、OPFR/OPE、污染物暴露、环境毒物或可迁移的毒性机制。",
+      "第三步：判断是否具有核心生物学相关性。重点看神经毒性、神经炎症、小胶质细胞、脑、海马、补体、神经免疫、肠-脑轴、突触、神经元-胶质细胞互作等。",
+      "第四步：判断机制深度和证据类型。动物实验、体外实验、功能验证、机制通路、多组学验证优先；纯观察性、纯描述性、无验证组学降权。",
+      "第五步：同时具备核心暴露、核心生物学方向和机制/实验证据的，优先标为 A。",
+      "第六步：只命中部分核心方向，但能支持专题背景、机制推断、方法借鉴或相邻假设的，标为 B。",
+      "第七步：仅有宽泛领域相关性、机制深度弱或可迁移性不明确的，标为 C。",
+      "第八步：若不确定，优先降一级，并在 uncertainty 和 missing_or_weak_scope 中说明原因。"
     ],
     "keyword_policy": {
-      "principle": "Keywords are evidence only and do not determine grade by themselves.",
+      "principle": "关键词只作为辅助证据，不直接决定等级。不能因为命中多个关键词就自动升为 A；也不能因为缺少某个关键词就自动降为 D。",
       "positive_keyword_groups": {
         "exposure": [
-          "example exposure"
+          "TPHP",
+          "Triphenyl phosphate",
+          "OPFR",
+          "OPE",
+          "pollutant",
+          "pollution",
+          "environmental exposure",
+          "toxicant",
+          "exposure"
         ],
-        "core_topic": [
-          "example mechanism"
+        "neurobiology": [
+          "neurotoxicity",
+          "microglia",
+          "neuroinflammation",
+          "brain",
+          "hippocampus",
+          "complement",
+          "neuron",
+          "glia",
+          "synapse",
+          "neuroimmune"
         ],
         "mechanism": [
           "mechanism",
           "pathway",
-          "validation"
+          "signaling",
+          "axis",
+          "omics",
+          "in vitro",
+          "animal model",
+          "functional validation"
         ]
       },
       "negative_keywords": [
-        "example exclusion"
-      ]
-    },
-    "terms": {
-      "exposure": [
-        "example exposure",
-        "sample topic"
+        "pollutant transfer",
+        "pollutant accumulation",
+        "pollutant degradation",
+        "pollutant removal",
+        "pollutant analysis",
+        "environmental analysis",
+        "environmental monitoring",
+        "environmental science",
+        "plant",
+        "insect model",
+        "cancer",
+        "tumor",
+        "virus"
       ],
-      "core_topic": [
-        "example mechanism",
-        "sample outcome"
-      ],
-      "mechanism": [
-        "mechanism",
-        "pathway",
-        "validation"
-      ]
+      "negative_keyword_handling": "负向关键词命中后应检查真实研究问题。若确属环境分析、工程、植物、昆虫、癌症、病毒等范围外主题，标为 D；若文章包含强生物医学机制价值，可降级保留为 B 或 C，但不得仅凭负向词直接删除。"
     },
-    "journal_whitelist": [
-      "nature",
-      "science",
-      "cell"
+    "uncertain_boundaries": [
+      {
+        "case": "缺乏机制验证的纯临床神经科学结局研究",
+        "default_grade": "C",
+        "upgrade_condition": "若能提供明确机制线索、暴露关联或可转化假设，可升为 B。"
+      },
+      {
+        "case": "缺乏功能验证的大规模组学关联研究",
+        "default_grade": "C",
+        "upgrade_condition": "若组学结果直接指向神经炎症、小胶质细胞、补体、肠-脑轴或污染物毒性机制，并有部分验证，可升为 B 或 A。"
+      },
+      {
+        "case": "机制深度强但不属于神经领域的研究",
+        "default_grade": "B",
+        "upgrade_condition": "若机制高度可迁移到当前神经毒性、免疫调控或污染物暴露问题，可升为 A。"
+      },
+      {
+        "case": "仅使用斑马鱼模型的机制研究",
+        "default_grade": "B",
+        "upgrade_condition": "若直接涉及污染物神经毒性或关键神经免疫机制，可升为 A；若机制弱，则降为 C。"
+      },
+      {
+        "case": "神经炎症语境之外的补体相关研究",
+        "default_grade": "B",
+        "upgrade_condition": "若与神经免疫、小胶质细胞、突触修剪、脑损伤或疾病机制直接相关，可升为 A。"
+      },
+      {
+        "case": "缺乏机制或实验验证的微生物组关联研究",
+        "default_grade": "C",
+        "upgrade_condition": "若涉及宿主-微生物互作、免疫调控、代谢机制、肠-脑轴或实验验证，可升为 B 或 A。"
+      }
     ],
-    "weights": {
-      "exposure": 1.6,
-      "core_topic": 1.5,
-      "mechanism": 0.7,
-      "journal_quality": 1.2,
-      "feedback_positive": 0.6,
-      "feedback_negative": -1
+    "reason_format": {
+      "required_fields": [
+        "grade",
+        "matched_scope",
+        "missing_or_weak_scope",
+        "evidence_type",
+        "grade_reason",
+        "uncertainty"
+      ],
+      "field_definitions": {
+        "grade": "A/B/C/D 分级结果。",
+        "matched_scope": "命中的核心范围，例如暴露因素、神经机制、模型、实验类型。",
+        "missing_or_weak_scope": "缺失或较弱的部分，例如无机制验证、非神经领域、非哺乳动物模型、纯观察性。",
+        "evidence_type": "证据类型，例如 animal study、in vitro、mechanism、omics with validation、cohort、clinical、engineering、environmental analysis。",
+        "grade_reason": "一句话说明为什么给出该等级。",
+        "uncertainty": "低/中/高。不确定时说明边界原因。"
+      },
+      "example": {
+        "grade": "B",
+        "matched_scope": "命中 OPFR 暴露和 neuroinflammation",
+        "missing_or_weak_scope": "缺少小胶质细胞或动物机制验证",
+        "evidence_type": "observational study with limited mechanistic discussion",
+        "grade_reason": "可作为污染物相关神经炎症背景，但机制证据不足，暂列 B。",
+        "uncertainty": "中"
+      }
+    }
+  },
+  "feedback_learning": {
+    "enabled": true,
+    "principle": "feedback 用于校准边界样本和发现长期偏好，不直接推翻人工定义的筛选标准，不把语义相似文献当作伪标签。",
+    "article_feedback_values": [
+      "keep",
+      "drop",
+      "upgrade",
+      "downgrade"
+    ],
+    "comment_optional": true,
+    "how_to_use_feedback": {
+      "keep": "表示用户认可该文献有保留价值。未来相似文献可在 B/C 或 C/D 边界上适度上调，但不能把明显无关或命中 strict_exclude 的文献升为 A。",
+      "drop": "表示用户认为该文献不值得保留。未来相似文献可在 B/C 或 C/D 边界上适度下调，但不能自动排除直接命中核心暴露、神经机制和实验验证的文献。",
+      "upgrade": "表示当前规则低估了该文献。应记录升级原因，尤其是被低估的机制类型、模型类型、疾病背景或可迁移价值。",
+      "downgrade": "表示当前规则高估了该文献。应记录误判原因，尤其是关键词误导、机制不足、纯观察性、环境分析导向或范围外主题。"
     },
-    "thresholds": {
-      "A_score": 6,
-      "A_min_exposure_hits": 2,
-      "A_min_core_hits": 2,
-      "B_score": 3.4,
-      "C_score": 1.4,
-      "B_uncertain_below": 4.2,
-      "C_uncertain_below": 2.3
+    "semantic_search": {
+      "adapter": "zotero_mcp",
+      "tools": [
+        "semantic_status",
+        "semantic_search"
+      ],
+      "purpose": "仅用于发现与 keep/upgrade/drop/downgrade 文献相似的偏好趋势或解释线索，不直接扩展当日候选池，不把语义邻居当作伪标签。"
     },
-    "grade_reasons": {
-      "A": "Direct match to configured scope.",
-      "B": "Related to configured topic or adjacent topic.",
-      "C": "Broad background relevance.",
-      "D": "Insufficient relevance to configured scope."
-    },
-    "semantic_grading": {
-      "enabled": true,
-      "min_score": 0.45,
-      "top_k": 5
+    "learning_policy": {
+      "auto_update_allowed": [
+        "记录高频 keep 或 upgrade 的主题模式",
+        "记录高频 drop 或 downgrade 的误判模式",
+        "建议新增、删除或调整关键词",
+        "建议补充 downgrade 或 strict_exclude 规则",
+        "建议把反复出现的边界情况加入 uncertain_boundaries"
+      ],
+      "auto_update_forbidden": [
+        "根据单次 feedback 永久改变 A/B/C/D 定义",
+        "自动重写 primary_question 或 research_focus",
+        "自动把语义相似文献标为正例或负例",
+        "自动删除人工定义的严格排除规则",
+        "自动把高影响因子期刊文献升为 A",
+        "自动把所有人群研究、组学研究或非神经机制研究一概排除"
+      ],
+      "manual_review_trigger": [
+        "同一原因连续出现 3 次 upgrade",
+        "同一原因连续出现 3 次 downgrade",
+        "A 类文献被用户多次 drop",
+        "D 类文献被用户多次 upgrade",
+        "某个负向关键词反复误杀有价值文献",
+        "某个正向关键词反复导致无关文献升高"
+      ]
     }
   }
 }

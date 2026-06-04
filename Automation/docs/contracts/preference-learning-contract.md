@@ -31,7 +31,10 @@
 
 - 作为人工修订显示格式，当前 additions 为红色，deletions 为蓝色删除线
 - 最多保留一个固定备份文件（`screening_standards.backup.docx`），每次运行覆盖
-- 评价区和 Pending Rule Suggestions 表是可消费工作空间；处理后必须清除已处理内容
+- 评价区和 Pending Rule Suggestions 表是可消费工作空间，Stage 1 默认读取并处理
+- 评价区只有在 AI 规则改写成功后才清空；AI key 缺失、LLM 失败或校验失败时必须保留原文并记录 blocker
+- AI 规则改写密钥优先 `PREFERENCE_LEARNING_API_KEY`，回退 `TITLE_TRANSLATION_API_KEY`；审计只记录 key 是否配置及 direct/fallback 来源，不记录密钥值
+- Pending Rule Suggestions 的 `accept/接受`、`reject/拒绝`、`revise/修改` 会被处理并从下一轮 docx 表移除；`pending/待定` 保留
 
 ## 证据聚类
 

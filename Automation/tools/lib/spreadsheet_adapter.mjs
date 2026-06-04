@@ -3,7 +3,7 @@ import path from "node:path";
 import { buildStandardSummary } from "./preference_refinement.mjs";
 
 export const EXPORT_METHODS = {
-  SPREADSHEETS_SKILL: "spreadsheets_skill",
+  CODEX_SPREADSHEET: "codex_spreadsheet",
   NODE_FALLBACK: "node_fallback",
   PYTHON_SPAWN_LEGACY: "python_spawn_legacy",
   MANUAL_REQUIRED: "manual_required",
@@ -21,12 +21,16 @@ export const DAILY_REVIEW_HEADERS = ["英文标题", "标题翻译", "规则等�
 
 export const HUMAN_REVIEW_HEADERS = ["标题", "标题翻译", "期刊/来源", "发表日期", "规则等级", "语义等级", "最终等级", "是否需人工复核", "分歧类型", "语义调整原因", "人工确认等级"];
 
-export async function detectSpreadsheetsSkillAvailability() {
+export async function detectCodexSpreadsheetAvailability() {
   try {
     await import("@oai/artifact-tool");
     return { available: true, reason: null };
   } catch (err) {
-    return { available: false, reason: String(err?.message || err) };
+    const rawReason = String(err?.message || err || "").trim();
+    const reason = rawReason.includes("@oai/artifact-tool")
+      ? `Spreadsheets plugin unavailable in this execution context (artifact-tool not visible here): ${rawReason}`
+      : `Spreadsheets plugin unavailable in this execution context: ${rawReason || "unknown import failure"}`;
+    return { available: false, reason };
   }
 }
 
@@ -242,7 +246,7 @@ function buildCompactStandardSummaryText(summary = {}, { unavailable = false } =
   return lines.join("\n");
 }
 
-export async function exportAllResearchOsXlsxWithSpreadsheetsSkill({
+export async function exportAllResearchOsXlsxWithCodexSpreadsheet({
   sourcePath,
   reviewRootDir,
   reviewWeekDir,
@@ -329,7 +333,7 @@ export async function detectNodeFallbackAvailability() {
 
 /**
  * Export xlsx using exceljs (node_fallback).
- * Replicates the same sheet structure and data validation as the spreadsheets_skill path.
+ * Replicates the same sheet structure and data validation as the Codex spreadsheet capability path.
  */
 export async function exportAllResearchOsXlsxWithNodeFallback({
   sourcePath,

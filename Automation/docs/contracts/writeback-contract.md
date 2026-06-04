@@ -9,11 +9,28 @@
 ## Zotero 集合结构
 
 - 根集合：`文献池`
-- 每日日期集合：`YYYY-MM-DD`（创建于日期集合下）
+- 每日日期集合：`YYYY-MM-DD`（创建于根集合 `文献池` 下）
 - 日期集合下创建：`RSS订阅`、`数据库检索`
 - 日期集合下创建：`A课题相关`、`B专题相关`、`C领域相关`
-- 条目不得直接放在根 `文献池`
+- 新入库条目必须先加入根 `文献池`，再加入每日来源/等级集合
+- 条目不得只停留在根 `文献池`
 - 条目不得直接放在日期集合本身
+
+## Zotero MCP mutation guard
+
+- 允许写操作的集合范围仅限：
+  - 唯一顶层 `文献池` 及其所有子集合
+  - 唯一顶层 `值得精读`
+- 缺失时自动创建：
+  - 顶层 `文献池`
+  - `文献池/待删除`
+  - 顶层 `值得精读`
+- `待删除` 只允许位于 `文献池/待删除`；顶层 `待删除` 不属于允许范围。
+- `值得精读` 只允许作为顶层集合；`文献池/值得精读` 不属于允许范围。
+- `add_items_to_collection`、`remove_items_from_collection`、`create_collection`、`delete_collection`、`write_metadata` 必须在进入 Zotero MCP 前经过统一 guard。
+- 目标或来源集合不在允许范围时，跳过对应操作并记录 `collection_scope_blocked`。
+- 必需集合存在同名歧义或位置错误时 fail closed。
+- 报告字段必须包含 `collection_scope_guard_enabled`、`collection_scope_blocked_count`、`collection_scope_blocked_samples`。
 
 ## 去重策略
 
@@ -48,17 +65,22 @@
 
 ## 翻译补翻（Pool Scan）
 
-- 扫描窗口：`ZOTERO_TRANSLATION_POOL_SCAN_WINDOW_DAYS`（默认 `2`），覆盖今天和上一次运行
+- 执行频率：`ZOTERO_TRANSLATION_POOL_SCAN_INTERVAL_DAYS`（默认 `4`），即每两次 2-day 自动化执行一次
+- 扫描窗口：`ZOTERO_TRANSLATION_POOL_SCAN_WINDOW_DAYS`（默认 `4`）
 - 仅检查最近日期子集合中缺少 shortTitle 的条目
 - 扫描限制：`ZOTERO_TRANSLATION_POOL_SCAN_LIMIT`（默认 `50`）
 - 补翻只静默补翻译，不混入隔日报数据源
+- `write_metadata` 只允许作用于 Stage 2 `writeback_items` 或 allowed pool scan 得到的条目。
 
 ## 历史集合修改
 
-- 在普通 Stage 1-4 写回期间禁止修改历史集合
+- Stage 1 默认执行 feedback item actions；设置 `APPLY_FEEDBACK_ITEM_ACTIONS=false` 时只生成计划。
 - 显式修正命令：`node tools/zotero_feedback_collection_corrections.mjs`
 - 修正必须仅使用 Zotero MCP，不访问 `zotero.sqlite`、不移动 PDF、不删除附件
 - `drop` 修正目标是 `文献池/待删除`
+- `upgrade` / `downgrade` 只允许在 `文献池` subtree 内移动到对应日期等级集合。
+- `keep` 为 no-op。
+- 历史归档清理集合不属于默认 feedback item actions；普通 pipeline 不删除 `历史反馈归档`。
 
 ## 禁止直接修改
 

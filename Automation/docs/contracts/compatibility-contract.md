@@ -13,7 +13,7 @@
 
 | 操作 | Windows | macOS | Linux |
 |------|---------|-------|-------|
-| 启动 Zotero | `powershell.exe Start-Process` / `schtasks` | `open -a Zotero` | `spawn(ZOTERO_EXE)` |
+| 启动 Zotero | `powershell.exe Start-Process` → `cmd.exe /c start` → detached `spawn(ZOTERO_EXE)`；`schtasks` 仅 legacy/manual | `open -a Zotero` | `spawn(ZOTERO_EXE)` |
 | 检测 Zotero 进程 | `tasklist` + `Get-Process` via pwsh | `ps -A -o comm=` | `ps -A -o comm=` |
 | 启动 Ollama | `powershell.exe Start-Process -WindowStyle Hidden ollama -ArgumentList "serve"` | `open -a Ollama` | spawn |
 
@@ -21,7 +21,7 @@
 
 ## 不能跨平台混用的命令
 
-- `schtasks` / `powershell.exe` / `tasklist` / `cmd.exe` / `Start-Process` 仅在 win32 代码路径中调用
+- `powershell.exe` / `tasklist` / `cmd.exe` / `Start-Process` 仅在 win32 代码路径中调用；`schtasks` 只保留为 legacy/manual compatibility path
 - macOS 必须使用 `open` / `ps` 等效命令
 - `ZOTERO_EXTERNAL_LAUNCHER=desktop_commander` 是 Windows-only 配置，macOS / Linux 不设置此值
 
@@ -51,9 +51,10 @@
 - 其他 1 级调整（C→B、B→A、B→C）自动采用
 - 2+ 级差异保持 `rule_grade` 并标记 `needs_human_review=true`
 
-## 无 package.json 约束
+## npm metadata
 
-- 当前仓库没有提交的 `package.json` 和 lockfile
+- 当前仓库已提交 `package.json` 和 `package-lock.json`
+- 新环境应先运行 `npm install`
 - 本地命令直接使用 Node 二进制运行
 - 窄验证命令：`node --test tests/*.test.mjs`（如存在）
 - 复现性依赖于文档化的运行时版本和 `.env.example`

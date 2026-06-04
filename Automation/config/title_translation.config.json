@@ -1,8 +1,8 @@
 {
-  "model": "example-translation-model",
+  "model": "mimo-v2-flash",
   "temperature": 0.2,
   "top_p": 0.95,
-  "stream": false,
+  "stream": true,
   "thinking": false,
   "timeout_ms": 30000,
   "max_retries": 2,
@@ -10,7 +10,8 @@
   "fallback_to_english": true,
   "rate_limit": {
     "rpm": 100,
-    "tpm": 1000000
+    "tpm": 10000000
   },
   "prompt_file": "prompts/title_translation.md"
 }
+

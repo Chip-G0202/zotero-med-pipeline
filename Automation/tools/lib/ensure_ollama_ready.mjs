@@ -1,4 +1,4 @@
-import { spawnSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 const DEFAULT_RETRIES = 10;
@@ -6,10 +6,6 @@ const DEFAULT_INTERVAL_MS = 3000;
 
 function getOllamaUrl() {
   return process.env.OLLAMA_HOST || DEFAULT_OLLAMA_URL;
-}
-
-function isWindowsPlatform() {
-  return process.platform === "win32";
 }
 
 function wait(ms) {
@@ -34,44 +30,59 @@ async function healthCheck(ollamaUrl) {
   return { ok: true, models: json?.models || [] };
 }
 
-function startOllamaWindows() {
-  const result = spawnSync("powershell.exe", [
-    "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-    'Start-Process -WindowStyle Hidden ollama -ArgumentList "serve"'
-  ], { encoding: "utf8" });
-  return {
-    method: "powershell_start_process",
-    success: result?.status === 0,
-    exitCode: result?.status ?? null,
-    stderr: trunc(result?.stderr),
-    stdout: trunc(result?.stdout),
-  };
+/**
+ * Start Ollama via node spawn (detached) — works in sandbox environments.
+ * No system binary spawning (no powershell, no cmd).
+ */
+function startOllamaNodeSpawn() {
+  try {
+    const child = spawn("ollama", ["serve"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+    return {
+      method: "node_spawn_ollama_serve",
+      success: true,
+      exitCode: null,
+      stderr: "",
+      stdout: "detached ollama serve",
+    };
+  } catch (error) {
+    return {
+      method: "node_spawn_ollama_serve",
+      success: false,
+      exitCode: null,
+      stderr: trunc(String(error)),
+      stdout: "",
+    };
+  }
 }
 
 function startOllamaMacOS() {
-  const result = spawnSync("open", ["-a", "Ollama"], { encoding: "utf8" });
-  return {
-    method: "open_macos",
-    success: result?.status === 0,
-    exitCode: result?.status ?? null,
-    stderr: trunc(result?.stderr),
-    stdout: trunc(result?.stdout),
-  };
-}
-
-function startOllamaLinux() {
-  const child = spawn("ollama", ["serve"], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-  return {
-    method: "spawn_linux_ollama_serve",
-    success: true,
-    exitCode: null,
-    stderr: "",
-    stdout: "detached ollama serve",
-  };
+  try {
+    const child = spawn("open", ["-a", "Ollama"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    return {
+      method: "open_macos",
+      success: true,
+      exitCode: null,
+      stderr: "",
+      stdout: "open -a Ollama",
+    };
+  } catch (error) {
+    return {
+      method: "open_macos",
+      success: false,
+      exitCode: null,
+      stderr: trunc(String(error)),
+      stdout: "",
+    };
+  }
 }
 
 function detectPlatform() {
@@ -89,9 +100,7 @@ export async function ensureOllamaReady({
   const ollamaUrl = dependencies.ollamaUrl || getOllamaUrl();
   const healthCheckFn = dependencies.healthCheck || healthCheck;
   const startOllamaFn = dependencies.startOllama || (
-    detectPlatform() === "windows" ? startOllamaWindows
-    : detectPlatform() === "macos" ? startOllamaMacOS
-    : startOllamaLinux
+    detectPlatform() === "macos" ? startOllamaMacOS : startOllamaNodeSpawn
   );
   const waitFn = dependencies.wait || wait;
 
