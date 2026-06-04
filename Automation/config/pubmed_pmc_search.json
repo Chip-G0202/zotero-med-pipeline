@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "用户可编辑：PubMed/PMC 数据库检索条件。默认只检索近 7 天，避免一次导入过多。",
+  "description": "Public example PubMed/PMC search configuration. Replace placeholder terms before running.",
   "databases": [
     "pubmed"
   ],
@@ -8,54 +8,23 @@
   "retmax": 300,
   "sort": "date",
   "datetype": "pdat",
-  "query": "(TPHP OR Triphenyl phosphate OR pollutant OR exposure OR OPFR OR OPE) AND (neurotoxicity OR microglia OR neuroinflammation OR brain OR Hippocampus OR complement) NOT (pollutant transfer OR pollutant accumulation OR environmental science OR cancer OR tumor OR virus OR plant OR insect model OR pollutant degradation OR pollutant removal OR pollutant analysis OR environmental analysis OR rice OR maize OR corn OR nanomaterial OR nanoparticle OR nanotechnology OR surgery OR surgical OR drug OR pharmaceutical OR peripheral neuropathy OR peripheral nervous system)",
+  "query": "(example biomedical topic) AND (example mechanism OR example outcome) NOT (example exclusion)",
   "keyword_groups": {
     "required": [
       [
-        "TPHP",
-        "Triphenyl phosphate",
-        "pollutant",
-        "exposure",
-        "OPFR",
-        "OPE"
+        "example biomedical topic",
+        "sample exposure"
       ],
       [
-        "neurotoxicity",
-        "microglia",
-        "neuroinflammation",
-        "brain",
-        "Hippocampus",
-        "complement"
+        "example mechanism",
+        "sample outcome"
       ]
     ],
     "optional": [
-      "-omics"
+      "example method"
     ],
     "negative": [
-      "pollutant transfer",
-      "pollutant accumulation",
-      "environmental science",
-      "cancer",
-      "tumor",
-      "virus",
-      "plant",
-      "insect model",
-      "pollutant degradation",
-      "pollutant removal",
-      "pollutant analysis",
-      "environmental analysis",
-      "rice",
-      "maize",
-      "corn",
-      "nanomaterial",
-      "nanoparticle",
-      "nanotechnology",
-      "surgery",
-      "surgical",
-      "drug",
-      "pharmaceutical",
-      "peripheral neuropathy",
-      "peripheral nervous system"
+      "example exclusion"
     ]
   }
 }

@@ -1,5 +1,5 @@
 {
-  "model": "mimo-v2.5-pro",
+  "model": "example-preference-learning-model",
   "temperature": 0.2,
   "top_p": 0.95,
   "stream": true,
