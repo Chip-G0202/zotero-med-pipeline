@@ -10,16 +10,16 @@
 
 固定顺序，每步可审计：
 
-1. `spreadsheets_skill` / artifact tool
+1. `codex_spreadsheet` / Codex spreadsheet capability (artifact tool-backed)
 2. `node_fallback`（仅当 `exceljs` 可用时启用）
 3. `manual_required`
 
-- `spreadsheets_skill` / artifact tool 是优先路径，适合 Codex 自动化环境。
+- `codex_spreadsheet` 是优先路径，实际由 Codex spreadsheet capability 提供；当前上下文如果看不到该 capability，会记录为“插件在当前执行上下文不可见”。
 - 在本地直接用 Node 运行时，缺少 `@oai/artifact-tool` 是正常情况，不应被解释为业务流程失败。
-- `node_fallback` 依赖可选的 `exceljs`。当前仓库不要求立即安装 `exceljs`，也不得声称 `package.json` 或 `exceljs` 已存在。
+- `node_fallback` 依赖 `exceljs`；当前仓库已提交 `package.json` 和 `package-lock.json`，新环境应先运行 `npm install`。
 - `manual_required` 是两种自动导出器都不可用时的明确失败状态，不是静默失败。
 - 每次导出必须在 `run_report.json` 中记录 `export_method`、`export_skill`、`output_path`、`input_files`、`generated_at`、`fallback_chain`。
-- `Spreadsheets` skill 仅负责 workbook 生成，不执行 triage、Zotero writeback、metadata backfill、semantic learning/search、preference updates、star migration 或 candidate ranking。
+- Codex spreadsheet capability 仅负责 workbook 生成，不执行 triage、Zotero writeback、metadata backfill、semantic learning/search、preference updates、star migration 或 candidate ranking。
 
 ### manual_required audit
 
@@ -33,7 +33,7 @@
 - `unmatchedWritebackCount`
 - `ambiguousCandidateKeyCount`
 - `ambiguousWritebackKeyCount`
-- 每个导出器不可用的原因，例如 `@oai/artifact-tool` 或 `exceljs` 缺失
+- 每个导出器不可用的原因，例如 `Spreadsheets` 插件在当前执行上下文不可见、`@oai/artifact-tool` 缺失，或 `exceljs` 缺失
 
 缺少导出器不得掩盖数据源过滤问题；即使最终不能生成 workbook，也应能从 audit 判断本次导出输入是否正确。
 
@@ -44,7 +44,7 @@
 - 仅包含当天 Stage2 实际写入 Zotero 的条目（来自 `mcp_writeback_summary.writeback_items`）
 - 不包含文献池去重跳过的重复条目
 - Stage 4 在导出前必须先基于 `mcp_writeback_summary.writeback_items` 过滤 `desktop_daily_review_source` / `allAbcItems`，无论是 orchestrator 调用还是 standalone 调用。
-- 不管使用 `spreadsheets_skill`、`node_fallback` 还是进入 `manual_required`，导出输入都不得回退为 Stage 1 全量 ABC 候选。
+- 不管使用 `codex_spreadsheet`、`node_fallback` 还是进入 `manual_required`，导出输入都不得回退为 Stage 1 全量 ABC 候选。
 - `writeback_items` 为空时，导出源应为空或标记 `no_new_writeback_items`，不得回退为全量 ABC。
 - `mcp_writeback_summary.json` 缺失或 `writeback_items` 缺失时，应降级并记录 warning，不得把 Stage 1 全量 ABC 伪装成已写回日报。
 - 匹配必须使用确定性 correlation key（title + source_channel + grade）；不得使用 title fuzzy match。

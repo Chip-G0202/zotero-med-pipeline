@@ -5,13 +5,17 @@ import { buildRuntimeConfig } from "./lib/runtime_config.mjs";
 import { parseToolText } from "./lib/writeback_support.mjs";
 import { ensureZoteroMcpReady } from "./lib/ensure_zotero_mcp_ready.mjs";
 import {
+  buildZoteroCollectionGuard,
+  recordCollectionScopeBlock,
+  summarizeCollectionScopeBlocks,
+} from "./lib/zotero_collection_guard.mjs";
+import {
   buildMovePlan,
   scanFeedbackRows,
   scanLiteratureRecords,
 } from "./archive_history_by_feedback.mjs";
 
 const MCP_URL = process.env.ZOTERO_MCP_URL || process.env.MCP_URL || "http://127.0.0.1:23120/mcp";
-const ZOTERO_WEB_API_BASE = process.env.ZOTERO_WEB_API_BASE || "https://api.zotero.org";
 const ROOT_COLLECTION = "文献池";
 const OLD_ARCHIVE_COLLECTION = "历史反馈归档";
 const DELETE_REVIEW_COLLECTION = "待删除";
@@ -54,80 +58,6 @@ async function defaultMcpToolCall(name, args, id) {
   const json = await res.json();
   if (json.error) throw new Error(`MCP ${name} failed: ${JSON.stringify(json.error)}`);
   return json.result;
-}
-
-function getZoteroWebDeleteConfig(env = process.env) {
-  const apiKey = cleanText(env.ZOTERO_API_KEY || env.ZOTERO_WEB_API_KEY);
-  const libraryType = cleanText(env.ZOTERO_LIBRARY_TYPE || "user").toLowerCase();
-  const libraryId = cleanText(env.ZOTERO_LIBRARY_ID || env.ZOTERO_USER_ID);
-  if (!apiKey || !libraryId) {
-    return {
-      ok: false,
-      provider: "zotero_web_api",
-      reason: "missing_ZOTERO_API_KEY_or_ZOTERO_USER_ID",
-      hasApiKey: Boolean(apiKey),
-      hasLibraryId: Boolean(libraryId),
-    };
-  }
-  if (!["user", "group"].includes(libraryType)) {
-    return { ok: false, provider: "zotero_web_api", reason: "invalid_ZOTERO_LIBRARY_TYPE" };
-  }
-  return {
-    ok: true,
-    provider: "zotero_web_api",
-    apiKey,
-    libraryType,
-    libraryId,
-    baseUrl: cleanText(env.ZOTERO_WEB_API_BASE) || ZOTERO_WEB_API_BASE,
-  };
-}
-
-async function zoteroWebApiRequest(pathname, { method = "GET", headers = {}, config, fetchImpl = fetch } = {}) {
-  const res = await fetchImpl(`${config.baseUrl.replace(/\/+$/, "")}${pathname}`, {
-    method,
-    headers: {
-      "Zotero-API-Version": "3",
-      "Zotero-API-Key": config.apiKey,
-      ...headers,
-    },
-  });
-  const text = await res.text();
-  return {
-    ok: res.ok,
-    status: res.status,
-    headers: res.headers,
-    text,
-  };
-}
-
-export async function deleteZoteroItemViaWebApi(itemKey, { config = getZoteroWebDeleteConfig(), fetchImpl = fetch } = {}) {
-  if (!config.ok) return { ok: false, status: "blocked", provider: config.provider, error: config.reason };
-  const prefix = config.libraryType === "group" ? `/groups/${encodeURIComponent(config.libraryId)}` : `/users/${encodeURIComponent(config.libraryId)}`;
-  const itemPath = `${prefix}/items/${encodeURIComponent(itemKey)}`;
-  const current = await zoteroWebApiRequest(itemPath, { config, fetchImpl });
-  if (!current.ok) {
-    return { ok: false, status: current.status, provider: config.provider, phase: "read_current_item", error: current.text.slice(0, 500) };
-  }
-  let version = current.headers.get?.("last-modified-version") || "";
-  if (!version) {
-    try {
-      const parsed = JSON.parse(current.text || "{}");
-      version = String(parsed?.data?.version || parsed?.version || "");
-    } catch {
-      version = "";
-    }
-  }
-  if (!version) return { ok: false, status: "blocked", provider: config.provider, phase: "read_current_item", error: "missing_item_version" };
-  const deleted = await zoteroWebApiRequest(itemPath, {
-    method: "DELETE",
-    headers: { "If-Unmodified-Since-Version": version },
-    config,
-    fetchImpl,
-  });
-  if (!deleted.ok) {
-    return { ok: false, status: deleted.status, provider: config.provider, phase: "delete_item", version, error: deleted.text.slice(0, 500) };
-  }
-  return { ok: true, status: deleted.status, provider: config.provider, version };
 }
 
 async function ensureMcpReady(mcpToolCall) {
@@ -283,17 +213,51 @@ function correctionActionForEntry(entry, collections) {
   };
 }
 
+function blockAction(action, check, blocks, extra = {}) {
+  recordCollectionScopeBlock(blocks, check, { itemKey: action.itemKey || "", phase: "feedback_correction_plan", ...extra });
+  action.status = "collection_scope_blocked";
+  action.reason = check.reason || "collection_scope_blocked";
+  return action;
+}
+
+function applyCollectionGuardToAction(action, collectionGuard, blocks) {
+  if (!collectionGuard || action.status !== "planned") return action;
+  if (action.action === "move_between_grade_collections") {
+    const target = collectionGuard.checkCollectionKey(action.target_collection_key, { action: "add_items_to_collection", role: "target_grade" });
+    if (!target.ok) return blockAction(action, target, blocks);
+    const source = collectionGuard.checkCollectionKey(action.source_collection_key, { action: "remove_items_from_collection", role: "source_grade" });
+    if (!source.ok) return blockAction(action, source, blocks);
+  }
+  if (action.action === "move_drop_to_delete_review_collection") {
+    if (action.target_collection_key) {
+      const target = collectionGuard.checkCollectionKey(action.target_collection_key, { action: "add_items_to_collection", role: "delete_review_target" });
+      if (!target.ok) return blockAction(action, target, blocks);
+    }
+    if (action.source_collection_key) {
+      const source = collectionGuard.checkCollectionKey(action.source_collection_key, { action: "remove_items_from_collection", role: "source_grade" });
+      if (!source.ok) return blockAction(action, source, blocks);
+    }
+  }
+  if (action.action === "delete_old_archive_collection") {
+    const target = collectionGuard.checkCollectionKey(action.collection_key, { action: "delete_collection", role: "cleanup_target" });
+    if (!target.ok) return blockAction(action, target, blocks);
+  }
+  return action;
+}
+
 export function buildCorrectionPlan({
   archivePlan = [],
   collections = [],
   includeArchiveCleanup = true,
   dropMode = "manual",
+  collectionGuard = null,
+  collectionScopeBlocks = null,
 } = {}) {
   const actions = archivePlan.map((entry) => {
     const action = correctionActionForEntry(entry, collections);
     if (dropMode === "quarantine" && action.status === "drop_manual_delete_required") {
       const target = findDeleteReviewCollection(collections);
-      return {
+      const nextAction = {
         ...action,
         status: "planned",
         action: "move_drop_to_delete_review_collection",
@@ -301,6 +265,18 @@ export function buildCorrectionPlan({
         target_collection_key: collectionKey(target),
         target_collection_name: DELETE_REVIEW_COLLECTION,
       };
+      const existingDeleteKeys = collectionGuard?.specialNameToKeys?.[DELETE_REVIEW_COLLECTION] || [];
+      if (!target && existingDeleteKeys.length > 0) {
+        return blockAction(nextAction, {
+          ok: false,
+          reason: existingDeleteKeys.length > 1 ? "special_collection_ambiguous" : "delete_review_collection_not_under_pool",
+          action: "create_collection",
+          role: "delete_review_target",
+          collectionKey: existingDeleteKeys.join(","),
+          collectionName: DELETE_REVIEW_COLLECTION,
+        }, Array.isArray(collectionScopeBlocks) ? collectionScopeBlocks : []);
+      }
+      return nextAction;
     }
     return action;
   });
@@ -314,7 +290,15 @@ export function buildCorrectionPlan({
       deleteItems: false,
     }))
     : [];
-  return { actions, cleanup_actions: cleanupActions };
+  const blocks = Array.isArray(collectionScopeBlocks) ? collectionScopeBlocks : [];
+  for (const action of actions) applyCollectionGuardToAction(action, collectionGuard, blocks);
+  for (const action of cleanupActions) applyCollectionGuardToAction(action, collectionGuard, blocks);
+  return {
+    actions,
+    cleanup_actions: cleanupActions,
+    ...(collectionGuard?.audit || {}),
+    ...summarizeCollectionScopeBlocks(blocks),
+  };
 }
 
 function levelFromZoteroDetails(details = {}) {
@@ -441,14 +425,30 @@ export async function applyCorrectionPlan(plan, {
   mcpToolCall = defaultMcpToolCall,
   applyMovesAndCleanup = true,
   applyDropQuarantine = false,
-  deleteDropItems = false,
-  deleteItem = deleteZoteroItemViaWebApi,
-  deleteConfig = getZoteroWebDeleteConfig(),
+  collectionGuard = null,
+  collectionScopeBlocks = null,
 } = {}) {
+  const locallyCreatedAllowedCollectionKeys = new Set();
   if (applyMovesAndCleanup) {
     for (const action of plan.actions || []) {
       if (action.status !== "planned" || action.action !== "move_between_grade_collections") continue;
       try {
+        if (collectionGuard) {
+          const target = collectionGuard.checkCollectionKey(action.target_collection_key, { action: "add_items_to_collection", role: "target_grade" });
+          if (!target.ok) {
+            recordCollectionScopeBlock(collectionScopeBlocks, target, { itemKey: action.itemKey || "", phase: "feedback_correction_apply" });
+            action.status = "collection_scope_blocked";
+            action.reason = target.reason;
+            continue;
+          }
+          const source = collectionGuard.checkCollectionKey(action.source_collection_key, { action: "remove_items_from_collection", role: "source_grade" });
+          if (!source.ok) {
+            recordCollectionScopeBlock(collectionScopeBlocks, source, { itemKey: action.itemKey || "", phase: "feedback_correction_apply" });
+            action.status = "collection_scope_blocked";
+            action.reason = source.reason;
+            continue;
+          }
+        }
         await mcpToolCall("add_items_to_collection", { collectionKey: action.target_collection_key, itemKeys: [action.itemKey] }, 870000);
         await mcpToolCall("remove_items_from_collection", { collectionKey: action.source_collection_key, itemKeys: [action.itemKey] }, 870001);
         action.status = "moved";
@@ -460,6 +460,15 @@ export async function applyCorrectionPlan(plan, {
     for (const action of plan.cleanup_actions || []) {
       if (action.status !== "planned" || action.action !== "delete_old_archive_collection") continue;
       try {
+        if (collectionGuard) {
+          const target = collectionGuard.checkCollectionKey(action.collection_key, { action: "delete_collection", role: "cleanup_target" });
+          if (!target.ok) {
+            recordCollectionScopeBlock(collectionScopeBlocks, target, { phase: "feedback_correction_apply" });
+            action.status = "collection_scope_blocked";
+            action.reason = target.reason;
+            continue;
+          }
+        }
         await mcpToolCall("delete_collection", { collectionKey: action.collection_key, deleteItems: false }, 880000);
         action.status = "deleted_collection_only";
       } catch (error) {
@@ -477,8 +486,38 @@ export async function applyCorrectionPlan(plan, {
       }
     }
     if (!deleteReviewCollectionKey) {
+      const existingDeleteKeys = collectionGuard?.specialNameToKeys?.[DELETE_REVIEW_COLLECTION] || [];
+      if (existingDeleteKeys.length > 0) {
+        const reason = existingDeleteKeys.length > 1 ? "special_collection_ambiguous" : "delete_review_collection_not_under_pool";
+        for (const action of plan.actions || []) {
+          if (action.action !== "move_drop_to_delete_review_collection") continue;
+          action.status = "collection_scope_blocked";
+          action.reason = reason;
+        }
+        recordCollectionScopeBlock(collectionScopeBlocks, {
+          action: "create_collection",
+          role: "delete_review_target",
+          collectionKey: existingDeleteKeys.join(","),
+          collectionName: DELETE_REVIEW_COLLECTION,
+          reason,
+        }, { phase: "feedback_correction_create_delete_review" });
+        return plan;
+      }
+      if (collectionGuard) {
+        const parent = collectionGuard.checkCollectionKey(plan.root_collection_key, { action: "create_collection", role: "delete_review_parent" });
+        if (!parent.ok) {
+          for (const action of plan.actions || []) {
+            if (action.action !== "move_drop_to_delete_review_collection") continue;
+            action.status = "collection_scope_blocked";
+            action.reason = parent.reason;
+          }
+          recordCollectionScopeBlock(collectionScopeBlocks, parent, { phase: "feedback_correction_create_delete_review" });
+          return plan;
+        }
+      }
       const created = parseToolText(await mcpToolCall("create_collection", { name: DELETE_REVIEW_COLLECTION, parentCollection: plan.root_collection_key }, 890000));
       deleteReviewCollectionKey = collectionKey(created);
+      if (deleteReviewCollectionKey) locallyCreatedAllowedCollectionKeys.add(deleteReviewCollectionKey);
       for (const action of plan.actions || []) {
         if (action.action === "move_drop_to_delete_review_collection") action.target_collection_key = deleteReviewCollectionKey;
       }
@@ -486,33 +525,31 @@ export async function applyCorrectionPlan(plan, {
     for (const action of plan.actions || []) {
       if (action.status !== "planned" || action.action !== "move_drop_to_delete_review_collection") continue;
       try {
+        if (collectionGuard) {
+          if (!locallyCreatedAllowedCollectionKeys.has(action.target_collection_key)) {
+            const target = collectionGuard.checkCollectionKey(action.target_collection_key, { action: "add_items_to_collection", role: "delete_review_target" });
+            if (!target.ok) {
+              recordCollectionScopeBlock(collectionScopeBlocks, target, { itemKey: action.itemKey || "", phase: "feedback_correction_apply" });
+              action.status = "collection_scope_blocked";
+              action.reason = target.reason;
+              continue;
+            }
+          }
+          if (action.source_collection_key) {
+            const source = collectionGuard.checkCollectionKey(action.source_collection_key, { action: "remove_items_from_collection", role: "source_grade" });
+            if (!source.ok) {
+              recordCollectionScopeBlock(collectionScopeBlocks, source, { itemKey: action.itemKey || "", phase: "feedback_correction_apply" });
+              action.status = "collection_scope_blocked";
+              action.reason = source.reason;
+              continue;
+            }
+          }
+        }
         await mcpToolCall("add_items_to_collection", { collectionKey: action.target_collection_key, itemKeys: [action.itemKey] }, 890100);
         if (action.source_collection_key) {
           await mcpToolCall("remove_items_from_collection", { collectionKey: action.source_collection_key, itemKeys: [action.itemKey] }, 890101);
         }
         action.status = "moved_to_delete_review";
-      } catch (error) {
-        action.status = "error";
-        action.error = String(error?.message || error);
-      }
-    }
-  }
-  if (deleteDropItems) {
-    for (const action of plan.actions || []) {
-      if (action.status !== "drop_manual_delete_required" || action.action !== "manual_delete_zotero_item") continue;
-      try {
-        const result = await deleteItem(action.itemKey, { config: deleteConfig });
-        action.delete_provider = result.provider || deleteConfig.provider || "";
-        action.delete_http_status = result.status || "";
-        action.delete_version = result.version || "";
-        if (!result.ok) {
-          action.status = "drop_delete_blocked";
-          action.error = result.error || "delete_failed";
-          action.delete_phase = result.phase || "";
-        } else {
-          action.status = "deleted_zotero_item";
-          action.reason = "moved_to_zotero_trash_by_web_api";
-        }
       } catch (error) {
         action.status = "error";
         action.error = String(error?.message || error);
@@ -533,13 +570,14 @@ function summarize(plan, mode) {
     planned: count("planned"),
     no_op: count("no_op"),
     drop_manual_delete_required: count("drop_manual_delete_required"),
-    drop_delete_blocked: count("drop_delete_blocked"),
-    deleted_zotero_item: count("deleted_zotero_item"),
     moved_to_delete_review: count("moved_to_delete_review"),
     needs_review: count("needs_review"),
+    collection_scope_blocked: count("collection_scope_blocked"),
     errors: count("error"),
     collection_cleanup_required: count("collection_cleanup_required"),
     deleted_collection_only: count("deleted_collection_only"),
+    collection_scope_blocked_count: Number(plan.collection_scope_blocked_count || count("collection_scope_blocked")),
+    collection_scope_blocked_samples: plan.collection_scope_blocked_samples || [],
   };
 }
 
@@ -562,10 +600,6 @@ function actionRows(plan) {
     title: entry.title || "",
     reason: entry.reason || "",
     error: entry.error || "",
-    delete_provider: entry.delete_provider || "",
-    delete_http_status: entry.delete_http_status || "",
-    delete_version: entry.delete_version || "",
-    delete_phase: entry.delete_phase || "",
   }));
 }
 
@@ -576,7 +610,7 @@ async function writeReports(manifestRoot, plan, summary) {
   const dropCsvPath = path.join(manifestRoot, `drop_manual_delete_required_${suffix}.csv`);
   const deleteReviewCsvPath = path.join(manifestRoot, `drop_delete_review_${suffix}.csv`);
   const cleanupCsvPath = path.join(manifestRoot, `old_archive_collection_cleanup_${suffix}.csv`);
-  const headers = ["status", "action", "itemKey", "date", "original_level", "assigned_level", "source_collection_key", "target_collection_key", "collection_key", "collection_name", "deleteItems", "feedback_action", "feedback_source", "feedback_row", "title", "reason", "error", "delete_provider", "delete_http_status", "delete_version", "delete_phase"];
+  const headers = ["status", "action", "itemKey", "date", "original_level", "assigned_level", "source_collection_key", "target_collection_key", "collection_key", "collection_name", "deleteItems", "feedback_action", "feedback_source", "feedback_row", "title", "reason", "error"];
   await writeCsv(csvPath, actionRows(plan), headers);
   await writeCsv(dropCsvPath, actionRows({ actions: plan.actions.filter((x) => x.status === "drop_manual_delete_required") }), headers);
   await writeCsv(deleteReviewCsvPath, actionRows({ actions: plan.actions.filter((x) => x.action === "move_drop_to_delete_review_collection") }), headers);
@@ -590,8 +624,7 @@ async function writeReports(manifestRoot, plan, summary) {
     safety: {
       removes_from_old_grade_collections_only_after_add: true,
       removes_source_collections: false,
-      deletes_zotero_items: summary.deleted_zotero_item > 0,
-      deletes_zotero_items_only_when_apply_delete_drops: summary.mode === "apply-delete-drops",
+      deletes_zotero_items: false,
       moves_drop_items_to_delete_review_only_when_apply_quarantine_drops: summary.mode === "apply-quarantine-drops",
       deletes_attachments: false,
       moves_pdf_files: false,
@@ -624,29 +657,40 @@ export async function runZoteroFeedbackCollectionCorrections({
   mcpToolCall = defaultMcpToolCall,
 } = {}) {
   const apply = argv.includes("--apply");
-  const deleteDropItems = argv.includes("--apply-delete-drops");
   const quarantineDropItems = argv.includes("--apply-quarantine-drops") || argv.includes("--dry-run-quarantine-drops");
   const weekArg = argv.find((arg) => arg.startsWith("--review-week-root="));
   const reviewWeekRoot = weekArg ? weekArg.split("=").slice(1).join("=") : path.join(runtime.reviewRoot, "26 Week21");
   await ensureMcpReady(mcpToolCall);
   const collections = await readCollections(mcpToolCall);
+  const collectionScopeBlocks = [];
+  const collectionGuard = buildZoteroCollectionGuard(collections);
   const root = findTopCollection(collections, ROOT_COLLECTION);
   const records = await scanLiteratureRecords(runtime.researchRoot);
   const feedbackRows = await scanFeedbackRows(reviewWeekRoot);
   const archivePlan = buildMovePlan({ records, feedbackRows, archiveRoot: path.join(runtime.researchRoot, "literature_archive") });
   await enrichArchivePlanWithZoteroTitleMatches(archivePlan, { mcpToolCall });
-  const plan = buildCorrectionPlan({ archivePlan, collections, includeArchiveCleanup: true, dropMode: quarantineDropItems ? "quarantine" : "manual" });
+  const plan = buildCorrectionPlan({
+    archivePlan,
+    collections,
+    includeArchiveCleanup: true,
+    dropMode: quarantineDropItems ? "quarantine" : "manual",
+    collectionGuard,
+    collectionScopeBlocks,
+  });
   plan.root_collection_key = collectionKey(root);
+  Object.assign(plan, collectionGuard.audit, summarizeCollectionScopeBlocks(collectionScopeBlocks));
   if (quarantineDropItems && !plan.root_collection_key) throw new Error("root collection 文献池 not found");
-  if (apply || deleteDropItems || argv.includes("--apply-quarantine-drops")) {
+  if (apply || argv.includes("--apply-quarantine-drops")) {
     await applyCorrectionPlan(plan, {
       mcpToolCall,
       applyMovesAndCleanup: apply,
       applyDropQuarantine: argv.includes("--apply-quarantine-drops"),
-      deleteDropItems,
+      collectionGuard,
+      collectionScopeBlocks,
     });
+    Object.assign(plan, summarizeCollectionScopeBlocks(collectionScopeBlocks));
   }
-  const summary = summarize(plan, deleteDropItems ? "apply-delete-drops" : argv.includes("--apply-quarantine-drops") ? "apply-quarantine-drops" : quarantineDropItems ? "dry-run-quarantine-drops" : apply ? "apply" : "dry-run");
+  const summary = summarize(plan, argv.includes("--apply-quarantine-drops") ? "apply-quarantine-drops" : quarantineDropItems ? "dry-run-quarantine-drops" : apply ? "apply" : "dry-run");
   const reports = await writeReports(path.join(runtime.researchRoot, "run_manifests"), plan, summary);
   return { ...reports, summary };
 }

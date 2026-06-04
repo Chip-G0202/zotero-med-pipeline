@@ -2,7 +2,7 @@
   "model": "example-preference-learning-model",
   "temperature": 0.2,
   "top_p": 0.95,
-  "stream": false,
+  "stream": true,
   "thinking": false,
   "timeout_ms": 30000,
   "max_retries": 2,
@@ -14,3 +14,4 @@
     "TITLE_TRANSLATION_API_KEY"
   ]
 }
+

@@ -6,8 +6,8 @@ import { buildSkillAlignmentMatrix } from "./lib/research_os_exports.mjs";
 import { buildFinalExportPayload, buildStage4StandaloneExportSource } from "./lib/finalize_exports_support.mjs";
 import {
   EXPORT_METHODS,
-  detectSpreadsheetsSkillAvailability,
-  exportAllResearchOsXlsxWithSpreadsheetsSkill,
+  detectCodexSpreadsheetAvailability,
+  exportAllResearchOsXlsxWithCodexSpreadsheet,
   detectNodeFallbackAvailability,
   exportAllResearchOsXlsxWithNodeFallback,
 } from "./lib/spreadsheet_adapter.mjs";
@@ -192,14 +192,14 @@ export async function finalizeResearchOsExports() {
     now: TODAY,
   });
 
-  const skillAvailability = await detectSpreadsheetsSkillAvailability();
+  const spreadsheetAvailability = await detectCodexSpreadsheetAvailability();
   const nodeFallbackAvailability = await detectNodeFallbackAvailability();
-  const fallbackChain = [EXPORT_METHODS.SPREADSHEETS_SKILL, EXPORT_METHODS.NODE_FALLBACK, EXPORT_METHODS.PYTHON_SPAWN_LEGACY, EXPORT_METHODS.MANUAL_REQUIRED];
+  const fallbackChain = [EXPORT_METHODS.CODEX_SPREADSHEET, EXPORT_METHODS.NODE_FALLBACK, EXPORT_METHODS.PYTHON_SPAWN_LEGACY, EXPORT_METHODS.MANUAL_REQUIRED];
 
   let exportAudit;
   let terminalExportError = null;
-  if (skillAvailability.available) {
-    const res = await exportAllResearchOsXlsxWithSpreadsheetsSkill({
+  if (spreadsheetAvailability.available) {
+    const res = await exportAllResearchOsXlsxWithCodexSpreadsheet({
       sourcePath,
       reviewRootDir: REVIEW_ROOT,
       reviewWeekDir,
@@ -214,9 +214,11 @@ export async function finalizeResearchOsExports() {
     }
     exportAudit = {
       stage4_export_status: "success",
-      export_method: EXPORT_METHODS.SPREADSHEETS_SKILL,
-      export_skill: "Spreadsheets",
-      spreadsheets_skill_available: true,
+      export_method: EXPORT_METHODS.CODEX_SPREADSHEET,
+      export_skill: "codex_spreadsheet",
+      export_provider: "Spreadsheets",
+      codex_spreadsheet_available: true,
+      spreadsheets_plugin_available: true,
       export_root: REVIEW_ROOT,
       requested_output_path: requestedOutputPath,
       actual_output_path: res.outputs?.every_other_day_report || null,
@@ -267,11 +269,14 @@ export async function finalizeResearchOsExports() {
       stage4_export_status: "success",
       export_method: EXPORT_METHODS.NODE_FALLBACK,
       export_skill: "exceljs",
-      spreadsheets_skill_available: false,
-      spreadsheets_skill_unavailable_reason: skillAvailability.reason,
+      export_provider: "exceljs",
+      codex_spreadsheet_available: false,
+      codex_spreadsheet_unavailable_reason: spreadsheetAvailability.reason,
+      spreadsheets_plugin_available: false,
+      spreadsheets_plugin_unavailable_reason: spreadsheetAvailability.reason,
       node_fallback_available: true,
       export_degraded: true,
-      export_degrade_reason: "spreadsheets_skill_unavailable_using_node_fallback",
+      export_degrade_reason: "codex_spreadsheet_unavailable_using_node_fallback",
       export_root: REVIEW_ROOT,
       requested_output_path: requestedOutputPath,
       actual_output_path: res.outputs?.every_other_day_report || null,
@@ -308,8 +313,11 @@ export async function finalizeResearchOsExports() {
       stage4_export_status: "failed",
       export_method: EXPORT_METHODS.MANUAL_REQUIRED,
       export_skill: null,
-      spreadsheets_skill_available: false,
-      spreadsheets_skill_unavailable_reason: skillAvailability.reason,
+      export_provider: null,
+      codex_spreadsheet_available: false,
+      codex_spreadsheet_unavailable_reason: spreadsheetAvailability.reason,
+      spreadsheets_plugin_available: false,
+      spreadsheets_plugin_unavailable_reason: spreadsheetAvailability.reason,
       node_fallback_available: false,
       node_fallback_unavailable_reason: nodeFallbackAvailability.reason,
       export_output_path: null,
@@ -323,7 +331,7 @@ export async function finalizeResearchOsExports() {
       export_excluded_d_count: Number(runReport?.counts?.d_skipped || 0),
       export_writeback_failures_count: Array.isArray(writebackSummary?.failures) ? writebackSummary.failures.length : 0,
       export_translation_failures_count: Number(backfillReport?.failure_count || 0),
-      export_error: "Both spreadsheets_skill and node_fallback unavailable",
+      export_error: "Both codex_spreadsheet and node_fallback unavailable",
       export_degraded: true,
       export_degrade_reason: "all_export_methods_unavailable",
       export_fallback_chain: fallbackChain,
@@ -338,7 +346,7 @@ export async function finalizeResearchOsExports() {
         "Rerun: node --env-file=.env tools/finalize_research_os_exports.mjs",
       ],
     };
-    terminalExportError = new Error(`ALL_EXPORT_METHODS_UNAVAILABLE: spreadsheets=${skillAvailability.reason} node_fallback=${nodeFallbackAvailability.reason}`);
+    terminalExportError = new Error(`ALL_EXPORT_METHODS_UNAVAILABLE: codex_spreadsheet=${spreadsheetAvailability.reason} node_fallback=${nodeFallbackAvailability.reason}`);
   }
 
   runReport.steps = runReport.steps || {};
@@ -347,7 +355,8 @@ export async function finalizeResearchOsExports() {
     ok: !terminalExportError,
     completed: !terminalExportError,
     date: dateStr,
-    export_policy: "spreadsheets_skill_first_for_daily_xlsx_with_biweekly_docx",
+    export_policy: "codex_spreadsheet_first_for_daily_xlsx_with_biweekly_docx",
+    export_provider_priority: ["Spreadsheets", "node_fallback", "python_spawn_legacy", "manual_required"],
     report_label: "隔日报",
     synthesis_label: "双周报",
     downgrade_reason: terminalExportError ? String(terminalExportError.message || terminalExportError) : "",
@@ -368,7 +377,17 @@ export async function finalizeResearchOsExports() {
   if (terminalExportError) {
     throw terminalExportError;
   }
-  await fs.writeFile(RUNTIME_STATE_PATH, JSON.stringify({ last_successful_full_run_at: new Date().toISOString(), last_accepted_planned_slot_at: runReport?.current_planned_slot_at || new Date().toISOString() }, null, 2), "utf8");
+  let runtimeState = {};
+  try {
+    runtimeState = JSON.parse(await fs.readFile(RUNTIME_STATE_PATH, "utf8"));
+  } catch {
+    runtimeState = {};
+  }
+  await fs.writeFile(RUNTIME_STATE_PATH, JSON.stringify({
+    ...runtimeState,
+    last_successful_full_run_at: new Date().toISOString(),
+    last_accepted_planned_slot_at: runReport?.current_planned_slot_at || new Date().toISOString(),
+  }, null, 2), "utf8");
 
   console.log(JSON.stringify({ ok: true, stage: "finalize_exports", export: exportAudit }, null, 2));
 }
@@ -387,7 +406,7 @@ export async function markFinalizeExportsFailure(err) {
       completed: false,
       date: fmtDate(TODAY),
       downgrade_reason: String(err?.message || err),
-      export_policy: "spreadsheets_skill_first_for_daily_and_biweekly_docx",
+      export_policy: "codex_spreadsheet_first_for_daily_and_biweekly_docx",
     };
     await fs.writeFile(runReportPath, JSON.stringify(runReport, null, 2), "utf8");
   } catch {}

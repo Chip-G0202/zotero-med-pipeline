@@ -180,7 +180,7 @@ function resolveTranslationConfig({ env = process.env } = {}) {
 }
 
 export function getTranslationApiLimits() {
-  const runtime = resolveTranslationConfig({ env });
+  const runtime = resolveTranslationConfig({ env: process.env });
   return {
     api_rpm_limit: (runtime.rateLimit || runtime.rate_limit || {}).rpm ?? null,
     api_tpm_limit: (runtime.rateLimit || runtime.rate_limit || {}).tpm ?? null,
@@ -460,7 +460,9 @@ async function translateWithRuntime(title, {
   const maxRetries = Math.max(0, Number(runtime.max_retries || 0));
 
   let lastErr = "unknown";
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+  // Allow more retries for 429 rate limit errors
+  const maxRetriesFor429 = Math.max(maxRetries, 5);
+  for (let attempt = 0; attempt <= maxRetriesFor429; attempt += 1) {
     try {
       const estimatedTokens = estimateTokensByChars(prompt) + estimateMaxOutputTokens(1);
       const nowMs = Date.now();
@@ -491,8 +493,13 @@ async function translateWithRuntime(title, {
       lastErr = String(error?.message || error || "unknown");
       const status = Number(error?.status || 0);
       const retryable = status === 429 || status >= 500 || /abort|timeout/i.test(lastErr);
-      if (!retryable || attempt >= maxRetries) break;
-      await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** attempt)));
+      const effectiveMax = status === 429 ? maxRetriesFor429 : maxRetries;
+      if (!retryable || attempt >= effectiveMax) break;
+      // 429 rate limit needs longer backoff than server errors
+      const baseDelay = status === 429 ? 3000 : 500;
+      const backoff = baseDelay * (2 ** attempt);
+      const jitter = Math.floor(Math.random() * 1000);
+      await new Promise((resolve) => setTimeout(resolve, backoff + jitter));
     }
   }
 

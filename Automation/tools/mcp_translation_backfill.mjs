@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import "./lib/env_file_bootstrap.mjs";
 import { getTranslationConfig, translateOne, translateTitlesBatch } from "./lib/title_translation_support.mjs";
 import {
   backfillShortTitles,
@@ -12,12 +13,14 @@ import {
 import { ensureZoteroMcpReady } from "./lib/ensure_zotero_mcp_ready.mjs";
 import { buildRuntimeConfig } from "./lib/runtime_config.mjs";
 import { parseToolText } from "./lib/writeback_support.mjs";
+import { summarizeCollectionScopeBlocks } from "./lib/zotero_collection_guard.mjs";
 
 const RUNTIME = buildRuntimeConfig();
 const ROOT = RUNTIME.projectRoot;
 const RESEARCH_ROOT = RUNTIME.researchRoot;
 const MCP_URL = process.env.ZOTERO_MCP_URL || process.env.MCP_URL || "http://127.0.0.1:23120/mcp";
 const TODAY = RUNTIME.now;
+const RUNTIME_STATE_PATH = path.join(RESEARCH_ROOT, "runtime_state.json");
 
 function fmtDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -137,6 +140,27 @@ async function collectExistingItemsMissingShortTitle(rootKey, existingKeys, { no
   return { candidates: scannedKeys, scanStats };
 }
 
+async function readRuntimeState() {
+  try {
+    return JSON.parse(await fs.readFile(RUNTIME_STATE_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function mergeRuntimeState(patch) {
+  const current = await readRuntimeState();
+  await fs.mkdir(path.dirname(RUNTIME_STATE_PATH), { recursive: true });
+  await fs.writeFile(RUNTIME_STATE_PATH, JSON.stringify({ ...current, ...patch }, null, 2), "utf8");
+}
+
+function elapsedDaysSince(isoValue, now) {
+  if (!isoValue) return Infinity;
+  const t = Date.parse(isoValue);
+  if (!Number.isFinite(t)) return Infinity;
+  return (now.getTime() - t) / 86400000;
+}
+
 export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
   const stageStarted = Date.now();
   await ensureMcpReady();
@@ -159,20 +183,33 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
     ? { ...summary, writeback_items: (summary.writeback_items || []).slice(offset, offset + limit) }
     : { ...summary, writeback_items: (summary.writeback_items || []).slice(offset) };
 
-  // Scan 文献池 for existing ABC items with empty shortTitle
-  // Pool scan is disabled by default (slow: one MCP get_item_details per item).
-  // Set ZOTERO_TRANSLATION_POOL_SCAN_ENABLED=true to enable; use --limit + ZOTERO_TRANSLATION_POOL_SCAN_LIMIT to control batch size.
-  const poolScanEnabled = String(process.env.ZOTERO_TRANSLATION_POOL_SCAN_ENABLED || "false").toLowerCase() === "true";
+  // Scan 文献池 for existing ABC items with empty shortTitle every two scheduled runs by default.
+  // The pipeline runs every 2 days, so the default pool-scan interval/window is 4 days.
+  const poolScanOptOut = /^(0|false|no|off)$/i.test(String(process.env.ZOTERO_TRANSLATION_POOL_SCAN_ENABLED ?? "true"));
+  const poolScanIntervalDays = Math.max(1, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_INTERVAL_DAYS || 4));
+  const poolScanWindowDays = Math.max(1, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_WINDOW_DAYS || 4));
+  const runtimeState = await readRuntimeState();
+  const lastPoolScanAt = runtimeState.last_translation_pool_scan_at || null;
+  const daysSincePoolScan = elapsedDaysSince(lastPoolScanAt, TODAY);
+  const poolScanDue = !poolScanOptOut && daysSincePoolScan >= poolScanIntervalDays;
   const rootKey = summary?.pool_collection_key || summary?.root_collection?.key || "";
+  const poolScanEnabled = Boolean(rootKey && poolScanDue);
   const writebackKeys = new Set((summaryForRun.writeback_items || []).map((it) => it.itemKey).filter(Boolean));
-  const poolScan = (rootKey && poolScanEnabled)
+  const poolScanSkipReason = poolScanOptOut
+    ? "disabled_by_env"
+    : !rootKey
+      ? "pool_collection_key_missing"
+      : !poolScanDue
+        ? "interval_not_reached"
+        : "";
+  const poolScan = poolScanEnabled
     ? await collectExistingItemsMissingShortTitle(rootKey, writebackKeys, {
         now: TODAY,
-        windowDays: Math.max(1, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_WINDOW_DAYS || 2)),
+        windowDays: poolScanWindowDays,
         idBase: 1100000,
         maxScan: Math.max(10, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_MAX_ITEMS || 100)),
       })
-    : { candidates: [], scanStats: { date_collections_scanned: 0, items_scanned: 0, items_missing_shorttitle: 0, errors: 0, scan_limited: false, scan_disabled: !poolScanEnabled } };
+    : { candidates: [], scanStats: { date_collections_scanned: 0, items_scanned: 0, items_missing_shorttitle: 0, errors: 0, scan_limited: false, scan_disabled: true, scan_skip_reason: poolScanSkipReason } };
 
   if (poolScan.candidates.length > 0) {
     const poolScanLimit = Math.max(1, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_LIMIT || 50));
@@ -181,6 +218,8 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
     summaryForRun = { ...summaryForRun, writeback_items: merged };
     console.error(`[translation_backfill] pool scan: ${poolScan.scanStats.items_missing_shorttitle} missing shortTitle, ${limited.length} added (limit=${poolScanLimit})`);
   }
+  const admittedMetadataItemKeys = new Set((summaryForRun.writeback_items || []).map((it) => it.itemKey).filter(Boolean));
+  const metadataScopeBlocks = [];
 
   const translationConfig = getTranslationConfig();
   const concurrencyRaw = process.env.ZOTERO_TRANSLATION_BACKFILL_CONCURRENCY;
@@ -206,6 +245,15 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
       metadataConcurrencyMax,
       observationMode,
       writeMetadata: async (itemKey, fields) => {
+        if (!admittedMetadataItemKeys.has(itemKey)) {
+          metadataScopeBlocks.push({
+            action: "write_metadata",
+            role: "shortTitle_backfill",
+            itemKey,
+            reason: "write_metadata_item_not_admitted_by_stage2_or_allowed_pool_scan",
+          });
+          throw new Error("collection_scope_blocked:write_metadata_item_not_admitted");
+        }
         await mcpToolCall("write_metadata", { itemKey, fields }, 980000 + Math.floor(Math.random() * 10000));
       },
     });
@@ -249,9 +297,12 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
     concurrency_clamped: concurrencyClamped,
     concurrency_default_used: source === "default",
     concurrency_source: source,
+    collection_scope_guard_enabled: true,
+    ...summarizeCollectionScopeBlocks(metadataScopeBlocks),
     ...(autoDowngrade || { backfill_auto_downgrade_triggered: false }),
     ...report,
   };
+  Object.assign(output, summarizeCollectionScopeBlocks(metadataScopeBlocks));
 
   // Diagnostic signals: distinguish no-candidates vs missing API key
   const writebackItemCount = (summary?.writeback_items || []).length;
@@ -269,6 +320,11 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
     pool_scan_errors: poolScan.scanStats.errors,
     pool_scan_limited: poolScan.scanStats.scan_limited,
     pool_scan_enabled: poolScanEnabled,
+    pool_scan_interval_days: poolScanIntervalDays,
+    pool_scan_window_days: poolScanWindowDays,
+    pool_scan_last_run_at: lastPoolScanAt,
+    pool_scan_days_since_last_run: Number.isFinite(daysSincePoolScan) ? daysSincePoolScan : null,
+    pool_scan_skip_reason: poolScanSkipReason,
     pool_scan_max_items: Math.max(10, Number(process.env.ZOTERO_TRANSLATION_POOL_SCAN_MAX_ITEMS || 100)),
     candidates_from_writeback: writebackItemCount,
     candidates_from_pool_scan: poolScan.candidates.length,
@@ -325,6 +381,12 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
     failures: report.failures,
   }, null, 2), "utf8");
   await fs.writeFile(usagePath, JSON.stringify(usageReport, null, 2), "utf8");
+  if (poolScanEnabled) {
+    await mergeRuntimeState({
+      last_translation_pool_scan_at: new Date().toISOString(),
+      last_translation_pool_scan_planned_slot_at: dateStr,
+    });
+  }
 
   try {
     const runReport = JSON.parse(await fs.readFile(runReportPath, "utf8"));
@@ -344,6 +406,9 @@ export async function runMcpTranslationBackfill({ argv = process.argv } = {}) {
       api_key_configured: translationConfig.apiKeyConfigured,
       usage_report_path: usagePath,
       diagnostic_signals: output.diagnostic_signals,
+      collection_scope_guard_enabled: true,
+      collection_scope_blocked_count: output.collection_scope_blocked_count,
+      collection_scope_blocked_samples: output.collection_scope_blocked_samples,
     };
     await fs.writeFile(runReportPath, JSON.stringify(runReport, null, 2), "utf8");
   } catch {}

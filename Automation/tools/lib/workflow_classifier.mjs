@@ -2,7 +2,7 @@
  * Workflow-based classifier for literature grading.
  * 
  * This module implements grading logic based solely on workflow_rules.json's grading_rules.
- * No hardcoded weights, thresholds, or exposure terms.
+ * No hardcoded weights, thresholds, or pollutant terms.
  * 
  * D-grade rules have highest priority: if a paper matches D-grade conditions,
  * it should be classified as D regardless of keyword matches.
@@ -74,42 +74,42 @@ function sourceLabel(sourcePlatform, sourceChannel) {
 // Each helper is named to match the corresponding rule description.
 
 /**
- * Check if the paper is about exposure degradation, removal, transfer,
- * accumulation, monitoring, detection, environmental analysis, or environmental_exposure
+ * Check if the paper is about pollutant degradation, removal, transfer,
+ * accumulation, monitoring, detection, environmental analysis, or pollution
  * characterization research.
  * 
  * Corresponds to workflow_rules.json D-grade strict_exclude rule:
- * "示例暴露因素降解、示例暴露因素去除、示例暴露因素转移、示例暴露因素累积、示例暴露特征分析、环境监测或环境分析导向研究"
+ * "污染物降解、污染物去除、污染物转移、污染物累积、污染特征分析、环境监测或环境分析导向研究"
  */
-function isEnvironmentalexposureFateStudy(text) {
-  const exposureFateTerms = [
-    // 示例暴露因素降解
-    "exposure degradation", "exposure degradat", "degradation of exposure",
+function isEnvironmentalPollutantFateStudy(text) {
+  const pollutantFateTerms = [
+    // 污染物降解
+    "pollutant degradation", "pollutant degradat", "degradation of pollutant",
     "biodegradation", "photodegradation", "photocatalytic degradation",
-    // 示例暴露因素去除
-    "exposure removal", "removal of exposure", "exposure eliminat",
+    // 污染物去除
+    "pollutant removal", "removal of pollutant", "pollutant eliminat",
     "contaminant removal", "removal efficiency",
-    // 示例暴露因素转移
-    "exposure transfer", "exposure transport", "contaminant transfer",
-    "exposure migration", "exposure fate",
-    // 示例暴露因素累积
-    "exposure accumulation", "exposure accumulat", "bioaccumulation",
-    "contaminant accumulation", "exposure bioaccumulat",
-    // 示例暴露特征分析
-    "environmental_exposure characterization", "environmental_exposure characterizat", "exposure characterization",
-    "contamination characterization", "environmental_exposure profile",
+    // 污染物转移
+    "pollutant transfer", "pollutant transport", "contaminant transfer",
+    "pollutant migration", "pollutant fate",
+    // 污染物累积
+    "pollutant accumulation", "pollutant accumulat", "bioaccumulation",
+    "contaminant accumulation", "pollutant bioaccumulat",
+    // 污染特征分析
+    "pollution characterization", "pollution characterizat", "pollutant characterization",
+    "contamination characterization", "pollution profile",
     // 环境监测
-    "environmental monitoring", "environment monitor", "environmental_exposure monitoring",
+    "environmental monitoring", "environment monitor", "pollution monitoring",
     "contamination monitoring", "environmental surveillance",
     // 环境分析
     "environmental analysis", "environment analysis", "environmental assessment",
-    "environmental impact assessment", "environmental_exposure analysis",
+    "environmental impact assessment", "pollution analysis",
     // 其他相关
     "wastewater treatment", "water treatment", "soil remediation",
     "environmental remediation", "phytoremediation",
-    "adsorption of exposure", "adsorption capacity",
+    "adsorption of pollutant", "adsorption capacity",
   ];
-  return exposureFateTerms.some((term) => text.includes(term));
+  return pollutantFateTerms.some((term) => text.includes(term));
 }
 
 /**
@@ -129,9 +129,9 @@ function isPureEngineeringOrMaterialsStudy(text) {
     "polymer composite", "metal alloy", "ceramic material",
   ];
   const biomedicalIndicators = [
-    "neurotox", "neuroinflam", "CELLTYPE_EXAMPLE", "brain", "neuron", "glia",
-    "blood-brain barrier", "neurodegenerat", "cognitive", "TISSUE_EXAMPLE",
-    "PATHWAY_EXAMPLE", "synap", "gut-brain", "microbiome", "immune",
+    "neurotox", "neuroinflam", "microglia", "brain", "neuron", "glia",
+    "blood-brain barrier", "neurodegenerat", "cognitive", "hippocampus",
+    "complement", "synap", "gut-brain", "microbiome", "immune",
   ];
   
   const hasEngineeringFocus = engineeringTerms.some((term) => text.includes(term));
@@ -145,7 +145,7 @@ function isPureEngineeringOrMaterialsStudy(text) {
  * research without direct biomedical relevance.
  * 
  * Corresponds to workflow_rules.json D-grade strict_exclude rule:
- * "范围外模型相关研究，除非具有直接生物医学机制相关性或疾病相关性"
+ * "植物相关研究，除非具有直接生物医学机制相关性或疾病相关性"
  */
 function isPlantOnlyStudy(text) {
   const plantTerms = [
@@ -155,7 +155,7 @@ function isPlantOnlyStudy(text) {
     "photosynthesis", "chloroplast", "stomatal",
   ];
   const biomedicalIndicators = [
-    "neurotox", "neuroinflam", "CELLTYPE_EXAMPLE", "brain", "neuron",
+    "neurotox", "neuroinflam", "microglia", "brain", "neuron",
     "blood-brain barrier", "neurodegenerat", "cognitive",
     "disease model", "animal model", "mammalian", "human",
   ];
@@ -197,11 +197,11 @@ function isNonMammalianModelWithoutInsight(text) {
 
 /**
  * Check if the paper is about cancer, tumor, virus or other out-of-scope topics,
- * unless directly serving current neuroimmune, exposure toxicity, or
+ * unless directly serving current neuroimmune, pollutant toxicity, or
  * transferable mechanism questions.
  * 
  * Corresponds to workflow_rules.json D-grade strict_exclude rule:
- * "范围外主题、范围外主题、范围外主题等范围外主题，除非直接服务当前关注的示例生物医学机制、示例暴露因素毒性或可迁移机制问题"
+ * "癌症、肿瘤、病毒等范围外主题，除非直接服务当前关注的神经免疫、污染物毒性或可迁移机制问题"
  */
 function isOutOfScopeTopic(text) {
   const outOfScopeTerms = [
@@ -210,8 +210,8 @@ function isOutOfScopeTopic(text) {
     "diabetes", "cardiovascular", "atherosclerosis",
   ];
   const relevantContextIndicators = [
-    "neurotox", "neuroinflam", "CELLTYPE_EXAMPLE", "neuron", "brain",
-    "exposure", "exposure", "environmental", "toxic",
+    "neurotox", "neuroinflam", "microglia", "neuron", "brain",
+    "pollutant", "exposure", "environmental", "toxic",
     "mechanism", "pathway", "signaling", "translational",
   ];
   
@@ -222,7 +222,7 @@ function isOutOfScopeTopic(text) {
 }
 
 /**
- * Check if the paper is only hit by keywords like exposure, exposure, brain,
+ * Check if the paper is only hit by keywords like pollutant, exposure, brain,
  * omics but the actual research question is not relevant.
  * 
  * This implements the D-grade rule for keyword-only matches without real relevance.
@@ -230,19 +230,19 @@ function isOutOfScopeTopic(text) {
 function isKeywordOnlyMatchWithoutRelevance(text) {
   // These are keywords that might cause false positives
   const triggerKeywords = [
-    "exposure", "environmental_exposure", "exposure", "brain", "omics",
+    "pollutant", "pollution", "exposure", "brain", "omics",
     "environmental", "contaminant", "toxic",
   ];
   
   // These indicate actual relevance to the research question
   const relevanceIndicators = [
-    "BIOOUTCOME_EXAMPLE", "INFLAMMATION_EXAMPLE", "CELLTYPE_EXAMPLE", "neuron", "glia",
-    "neurodegenerat", "cognitive", "TISSUE_EXAMPLE", "blood-brain barrier",
-    "PATHWAY_EXAMPLE", "synap", "mitochond", "oxidative stress",
+    "neurotoxicity", "neuroinflammation", "microglia", "neuron", "glia",
+    "neurodegenerat", "cognitive", "hippocampus", "blood-brain barrier",
+    "complement", "synap", "mitochond", "oxidative stress",
     "mechanism", "pathway", "signaling", "animal model", "in vitro",
     "cell experiment", "experimental validation",
     // Core exposure terms
-    "exposure_a", "exposure_synonym", "exposure_class", "exposure_group", "example exposure class",
+    "tphp", "triphenyl phosphate", "opfr", "ope", "organophosphate flame retardant",
   ];
   
   const hasTriggerKeyword = triggerKeywords.some((term) => text.includes(term));
@@ -256,8 +256,8 @@ function isKeywordOnlyMatchWithoutRelevance(text) {
 
 /**
  * Check if paper matches A-grade definition from workflow_rules.json:
- * "直接命中当前核心研究方向，且具有明确机制深度或实验验证价值。通常同时涉及目标暴露或示例暴露因素，
- *  以及示例生物学结局、示例炎症机制、示例细胞类型、示例通路、脑区损伤、示例生物医学机制或相关机制。"
+ * "直接命中当前核心研究方向，且具有明确机制深度或实验验证价值。通常同时涉及目标暴露或污染物，
+ *  以及神经毒性、神经炎症、小胶质细胞、补体、脑区损伤、神经免疫或相关机制。"
  */
 function matchesAGrade(text) {
   const coreExposureTerms = TRIAGE_RULES.research_focus?.core_exposure_terms || [];
@@ -274,7 +274,7 @@ function matchesAGrade(text) {
 
 /**
  * Check if paper matches B-grade definition from workflow_rules.json:
- * "命中部分核心研究方向，但缺少明确机制深度或实验验证。通常涉及暴露或示例暴露因素与生物医学生物学的交叉，
+ * "命中部分核心研究方向，但缺少明确机制深度或实验验证。通常涉及暴露或污染物与神经生物学的交叉，
  *  但证据类型为关联性、描述性或初步探索。"
  */
 function matchesBGrade(text) {
@@ -292,7 +292,7 @@ function matchesBGrade(text) {
 
 /**
  * Check if paper matches C-grade definition from workflow_rules.json:
- * "与领域相关但缺乏直接的暴露-生物医学生物学交叉证据。可能涉及相关机制、模型或方法，
+ * "与领域相关但缺乏直接的暴露-神经生物学交叉证据。可能涉及相关机制、模型或方法，
  *  但不直接针对当前研究问题。"
  */
 function matchesCGrade(text) {
@@ -317,16 +317,16 @@ export function classifyItem(item = {}, prefs = {}, standards = null) {
   // D-grade rules have HIGHEST priority
   // Check all D-grade conditions first
   
-  // 1. Check if it's environmental exposure fate study
-  if (isEnvironmentalexposureFateStudy(text)) {
+  // 1. Check if it's environmental pollutant fate study
+  if (isEnvironmentalPollutantFateStudy(text)) {
     return {
       grade: "D",
       grade_label: LABELS.D,
-      grade_reason: "示例暴露因素降解、去除、转移、累积、监测、检测、环境分析或示例暴露特征分析导向研究",
-      classification_reason: "命中 D 级严格排除规则：示例暴露因素环境过程研究",
+      grade_reason: "污染物降解、去除、转移、累积、监测、检测、环境分析或污染特征分析导向研究",
+      classification_reason: "命中 D 级严格排除规则：污染物环境过程研究",
       hard_excluded: true,
       matched_standard_rules: [],
-      matched_signals: ["d_grade_rule:environmental_exposure_fate"],
+      matched_signals: ["d_grade_rule:environmental_pollutant_fate"],
       writeback_ready: false,
       triage_version: TRIAGE_VERSION,
       standards_used: false,
@@ -334,7 +334,7 @@ export function classifyItem(item = {}, prefs = {}, standards = null) {
       score: 0,
       source: sourceLabel(item.source_platform, item.source_channel),
       dedupe_key: buildDedupeKey(item),
-      scoring_detail: { d_grade_rule: "environmental_exposure_fate" },
+      scoring_detail: { d_grade_rule: "environmental_pollutant_fate" },
     };
   }
 
@@ -343,7 +343,7 @@ export function classifyItem(item = {}, prefs = {}, standards = null) {
     return {
       grade: "D",
       grade_label: LABELS.D,
-      grade_reason: "仅因标题或摘要出现 exposure、exposure、brain、omics 等词而被检出，但实际研究问题不相关",
+      grade_reason: "仅因标题或摘要出现 pollutant、exposure、brain、omics 等词而被检出，但实际研究问题不相关",
       classification_reason: "命中 D 级规则：关键词误命中但研究问题不相关",
       hard_excluded: true,
       matched_standard_rules: [],
@@ -384,8 +384,8 @@ export function classifyItem(item = {}, prefs = {}, standards = null) {
     return {
       grade: "D",
       grade_label: LABELS.D,
-      grade_reason: "范围外模型相关研究，缺乏直接生物医学机制相关性或疾病相关性",
-      classification_reason: "命中 D 级严格排除规则：纯范围外模型研究",
+      grade_reason: "植物相关研究，缺乏直接生物医学机制相关性或疾病相关性",
+      classification_reason: "命中 D 级严格排除规则：纯植物研究",
       hard_excluded: true,
       matched_standard_rules: [],
       matched_signals: ["d_grade_rule:plant_only"],
@@ -424,7 +424,7 @@ export function classifyItem(item = {}, prefs = {}, standards = null) {
     return {
       grade: "D",
       grade_label: LABELS.D,
-      grade_reason: "范围外主题、范围外主题、范围外主题等范围外主题",
+      grade_reason: "癌症、肿瘤、病毒等范围外主题",
       classification_reason: "命中 D 级严格排除规则：范围外主题",
       hard_excluded: true,
       matched_standard_rules: [],
@@ -486,7 +486,7 @@ export function classifyItem(item = {}, prefs = {}, standards = null) {
     return {
       grade: "C",
       grade_label: LABELS.C,
-      grade_reason: GRADING_RULES.C?.definition || "与领域相关但缺乏直接的暴露-生物医学生物学交叉证据",
+      grade_reason: GRADING_RULES.C?.definition || "与领域相关但缺乏直接的暴露-神经生物学交叉证据",
       classification_reason: "命中 C 级规则：领域相关",
       hard_excluded: false,
       matched_standard_rules: [],
@@ -678,7 +678,7 @@ export function deriveSemanticGradeFromFeedbackMatches({
 /**
  * Derive semantic grade purely from current research standards (no feedback dependency).
  * Uses workflow_rules.json research_focus term lists + semantic_search results to evaluate
- * whether an item aligns with the current configured scope.
+ * whether an item aligns with the current research direction.
  */
 export function deriveSemanticGradeFromStandards({
   item = {},
@@ -839,12 +839,12 @@ export function parseScreeningStandards(markdown) {
   for (const rule of sections.hard_excludes) {
     const lower = rule.toLowerCase();
     const keywords = [];
-    if (lower.includes("降解") || lower.includes("去除") || lower.includes("转移") || lower.includes("累积") || lower.includes("监测") || lower.includes("检测") || lower.includes("环境分析") || lower.includes("示例暴露特征")) keywords.push("degradation", "removal", "transfer", "accumulation", "monitoring", "detection", "environmental analysis", "environmental_exposure characterization");
+    if (lower.includes("降解") || lower.includes("去除") || lower.includes("转移") || lower.includes("累积") || lower.includes("监测") || lower.includes("检测") || lower.includes("环境分析") || lower.includes("污染特征")) keywords.push("degradation", "removal", "transfer", "accumulation", "monitoring", "detection", "environmental analysis", "pollution characterization");
     if (lower.includes("工程") || lower.includes("计算") || lower.includes("材料") || lower.includes("物理") || lower.includes("电子") || lower.includes("机械")) keywords.push("engineering", "computational", "material", "physics", "electronics", "mechanical");
     if (lower.includes("纯ai") || lower.includes("算法") || lower.includes("工具开发") || lower.includes("理论建模")) keywords.push("pure ai", "algorithm", "tool development", "theoretical modeling");
-    if (lower.includes("范围外模型")) keywords.push("plant", "arabidopsis", "rice", "wheat");
+    if (lower.includes("植物")) keywords.push("plant", "arabidopsis", "rice", "wheat");
     if (lower.includes("昆虫") || lower.includes("线虫") || lower.includes("酵母")) keywords.push("insect", "nematode", "yeast", "drosophila", "c. elegans");
-    if (lower.includes("范围外主题") || lower.includes("范围外主题") || lower.includes("范围外主题")) keywords.push("cancer", "tumor", "virus", "oncolog");
+    if (lower.includes("癌症") || lower.includes("肿瘤") || lower.includes("病毒")) keywords.push("cancer", "tumor", "virus", "oncolog");
     if (keywords.length === 0) keywords.push(lower.slice(0, 50));
     hardExcludes.push({ rule, keywords, section: "严格排除" });
   }
@@ -867,9 +867,9 @@ export function parseScreeningStandards(markdown) {
     const lower = rule.toLowerCase();
     const keywords = [];
     if (lower.includes("动物实验") || lower.includes("哺乳动物") || lower.includes("小鼠") || lower.includes("大鼠") || lower.includes("mouse") || lower.includes("rat")) keywords.push("animal", "mouse", "mice", "rat", "mammal", "动物实验", "小鼠", "大鼠");
-    if (lower.includes("生物医学") || lower.includes("小胶质") || lower.includes("突触") || lower.includes("neuro") || lower.includes("CELLTYPE_EXAMPLE") || lower.includes("synap")) keywords.push("neuro", "CELLTYPE_EXAMPLE", "synapse", "brain", "生物医学", "小胶质", "突触");
+    if (lower.includes("神经") || lower.includes("小胶质") || lower.includes("突触") || lower.includes("neuro") || lower.includes("microglia") || lower.includes("synap")) keywords.push("neuro", "microglia", "synapse", "brain", "神经", "小胶质", "突触");
     if (lower.includes("组学") || lower.includes("转录组") || lower.includes("蛋白组") || lower.includes("代谢组") || lower.includes("omics") || lower.includes("transcriptom") || lower.includes("proteom") || lower.includes("metabolom")) keywords.push("omics", "transcriptomics", "proteomics", "metabolomics", "组学");
-    if (lower.includes("示例通路") || lower.includes("PATHWAY_EXAMPLE")) keywords.push("PATHWAY_EXAMPLE", "示例通路");
+    if (lower.includes("补体") || lower.includes("complement")) keywords.push("complement", "补体");
     if (lower.includes("肠道") || lower.includes("菌群") || lower.includes("微生物") || lower.includes("microbio") || lower.includes("gut")) keywords.push("microbiome", "gut", "microbiota", "肠道", "菌群", "微生物");
     if (lower.includes("斑马鱼") || lower.includes("zebrafish")) keywords.push("zebrafish", "斑马鱼");
     if (keywords.length === 0) keywords.push(lower.slice(0, 50));

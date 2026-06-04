@@ -91,7 +91,7 @@ function normalizeSemanticItems(raw) {
 export function createZoteroSemanticAdapter({
   fetchImpl = fetch,
   mcpUrl = resolveMcpUrl(),
-  enabled = parseEnabled(process.env.ZOTERO_SEMANTIC_PREFERENCE_ENABLED),
+  enabled = parseEnabled(process.env.ZOTERO_SEMANTIC_PREFERENCE_ENABLED ?? "true"),
   limit = getLimit(),
   minScore = getMinScore(),
   language = getLanguage(),

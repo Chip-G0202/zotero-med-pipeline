@@ -28,12 +28,12 @@ export const INITIAL_SCREENING_STANDARDS_ZH = `# 文献筛选标准
 ## 优先关注
 
 * 优先关注动物实验，尤其是哺乳动物疾病模型（如小鼠、大鼠等）、体外实验、机制研究和基础机制研究场景。
-* 优先关注涉及生物医学生物学、示例炎症机制、示例细胞类型、生物医学元-胶质细胞相互作用、突触调控或相关生物医学系统通路的机制研究。
+* 优先关注涉及神经生物学、神经炎症、小胶质细胞、神经元-胶质细胞相互作用、突触调控或相关神经系统通路的机制研究。
 * 优先关注多组学机制研究（如转录组学、蛋白质组学、代谢组学、单细胞组学、空间组学、整合组学分析），尤其是与疾病机制相关并有实验验证支持的研究。
-* 优先关注示例通路相关研究、示例通路激活通路、示例通路介导的示例炎症机制、免疫调控机制或示例生物医学机制相互作用。
-* 优先关注示例微生态或微生物组相关研究，尤其是涉及疾病机制、宿主-微生物相互作用、示例生物医学机制调控、代谢、示例机制轴、多组学整合或实验验证的研究。
+* 优先关注补体系统相关研究、补体激活通路、补体介导的神经炎症、免疫调控机制或神经免疫相互作用。
+* 优先关注肠道菌群或微生物组相关研究，尤其是涉及疾病机制、宿主-微生物相互作用、神经免疫调控、代谢、肠-脑轴、多组学整合或实验验证的研究。
 * 非哺乳动物模型中，斑马鱼研究优先级高于其他非哺乳动物模型。
-* 即使不属于生物医学领域，只要机制深度强、生物学信息量高或具有广泛可转化意义，也优先关注探索性或基础机制研究。
+* 即使不属于神经领域，只要机制深度强、生物学信息量高或具有广泛可转化意义，也优先关注探索性或基础机制研究。
 
 ---
 
@@ -41,7 +41,7 @@ export const INITIAL_SCREENING_STANDARDS_ZH = `# 文献筛选标准
 
 * 降权缺乏机制深度的人群队列研究、流行病学关联研究、大型观察性结局研究或纯临床结局导向研究。
 * 降权肾脏结局研究和以肾脏为中心的临床结局场景，除非其直接关联更广泛关注的机制问题。
-* 降权范围外模型生物学、范围外模型组学或范围外模型机制研究，即使使用了多组学方法。
+* 降权植物生物学、植物组学或植物机制研究，即使使用了多组学方法。
 * 降权斑马鱼以外的非哺乳动物研究（如果蝇、线虫、酵母、昆虫单一模型等），除非其机制洞见特别突出。
 * 降权缺乏机制洞见、细胞验证、动物建模或功能实验的纯描述性临床研究。
 * 降权缺乏功能验证或机制解释的大规模组学关联研究。
@@ -59,11 +59,11 @@ export const INITIAL_SCREENING_STANDARDS_ZH = `# 文献筛选标准
 
 ## 不确定边界
 
-* 对缺乏机制验证的纯临床生物医学科学结局研究，目前反馈存在冲突；用于分级前需要继续细化边界。
+* 对缺乏机制验证的纯临床神经科学结局研究，目前反馈存在冲突；用于分级前需要继续细化边界。
 * 对缺乏功能验证的大规模组学关联研究，目前反馈存在冲突；用于分级前需要继续细化边界。
-* 对机制深度较强但不属于生物医学领域的研究，目前反馈存在冲突；用于分级前需要继续细化边界。
+* 对机制深度较强但不属于神经领域的研究，目前反馈存在冲突；用于分级前需要继续细化边界。
 * 对仅使用斑马鱼模型的机制研究，目前反馈存在冲突；用于分级前需要继续细化边界。
-* 对示例炎症机制语境之外的示例通路相关研究，目前反馈存在冲突；用于分级前需要继续细化边界。
+* 对神经炎症语境之外的补体相关研究，目前反馈存在冲突；用于分级前需要继续细化边界。
 * 对缺乏机制或实验验证的微生物组关联研究，目前反馈存在冲突；用于分级前需要继续细化边界。
 
 ---
@@ -72,10 +72,10 @@ export const INITIAL_SCREENING_STANDARDS_ZH = `# 文献筛选标准
 
 * 对人群队列或临床结局研究的降权仅适用于纯观察性或机制较弱的场景，不应泛化到整个主题。
 * 只有当组学分析提供有意义的机制洞见，而不只是描述性谱系分析时，才优先关注多组学研究。
-* 如果机制相关性强，生物医学或示例细胞类型研究可跨疾病领域广泛优先关注。
+* 如果机制相关性强，神经或小胶质细胞研究可跨疾病领域广泛优先关注。
 * 只有当微生物组研究涉及生物学机制、宿主相互作用、免疫调控、代谢或实验验证时，才优先关注。
 * 对非哺乳动物模型的降权仅适用于机制相关性较弱的场景；机制洞见特别突出的研究仍可纳入。
-* 范围外模型研究原则上广泛降权，不因使用组学方法而提高优先级，除非其直接关联保守的生物医学机制。
+* 植物研究原则上广泛降权，不因使用组学方法而提高优先级，除非其直接关联保守的生物医学机制。
 * 工程导向研究只有在具有明确的生物医学机制可解释性或疾病相关性时才可避免严格排除。
 `;
 
@@ -245,7 +245,7 @@ export function generateRuleSuggestionsFromFeedback({ feedbackSignals = [], feed
     { tag: "mechanism", pattern: /\bmechanis|pathway|signaling|通路|机制/i },
     { tag: "clinical outcome", pattern: /\bpatient|clinical outcome|人群|临床结局/i },
     { tag: "omics", pattern: /\bomics\b|transcriptom|proteom|metabolom|单细胞|组学/i },
-    { tag: "plant", pattern: /\bplant\b|范围外模型/i },
+    { tag: "plant", pattern: /\bplant\b|植物/i },
     { tag: "non-mammal", pattern: /\binsect\b|nematode|线虫|昆虫|酵母|果蝇/i },
     { tag: "engineering", pattern: /\bengineering\b|材料科学|电子|机械/i },
     { tag: "AI/algorithm", pattern: /\bartificial intelligence\b|\bAI\b|algorithm|算法/i },
@@ -965,7 +965,7 @@ export async function parseScreeningStandardsDocx(docxPath) {
     if (!captured && !currentSection) unknownBlocks.push(block);
     if (!captured && KNOWN_SECTIONS.has(currentSection) && text) unknownBlocks.push(block);
   }
-  // Filter out managed template/system blocks from unknown blocks to prevent recursive environmental_exposure
+  // Filter out managed template/system blocks from unknown blocks to prevent recursive pollution
   const filteredUnknownBlocks = unknownBlocks.filter((block) => {
     const textMatch = block.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g);
     if (!textMatch) return true;
@@ -1017,6 +1017,13 @@ function emptyAudit({ auditPath, llmConfig = null, pubmedQueryBefore = "", pubme
     evaluation_cleared: false,
     llm_model: llmConfig?.model || "",
     llm_config_path: llmConfig?.configPath || "",
+    llm_api_key_configured: Boolean(llmConfig?.apiKeyConfigured),
+    llm_api_key_source: llmConfig?.apiKeyEnvName || "",
+    llm_api_key_source_kind: llmConfig?.apiKeyEnvName === "PREFERENCE_LEARNING_API_KEY"
+      ? "direct"
+      : llmConfig?.apiKeyEnvName === "TITLE_TRANSLATION_API_KEY"
+        ? "fallback"
+        : "",
     llm_unavailable: false,
     rules_added: [],
     rules_deleted: [],

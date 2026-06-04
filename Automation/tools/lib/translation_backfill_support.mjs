@@ -176,6 +176,36 @@ export async function backfillShortTitles(summary, {
     }
   }
 
+  // Retry pass: re-attempt items that failed due to 429 rate limit or transient errors
+  const rateLimitFailures = report.failures.filter((f) =>
+    /429|rate.?limit|HTTP_429/i.test(String(f.reason || ""))
+  );
+  if (rateLimitFailures.length > 0) {
+    const retryDelayMs = 10000;
+    console.error(`[translation_backfill] retry pass: ${rateLimitFailures.length} items failed due to 429, waiting ${retryDelayMs}ms before retry`);
+    await new Promise((r) => setTimeout(r, retryDelayMs));
+    // Reset failures list for retry tracking
+    const retryItems = rateLimitFailures.map((f) => ({
+      itemKey: f.itemKey,
+      title: f.title,
+      grade: items.find((it) => it.itemKey === f.itemKey)?.grade || "C",
+      source_channel: "retry",
+    }));
+    // Remove old failures that will be retried
+    report.failure_count -= rateLimitFailures.length;
+    report.failures = report.failures.filter((f) => !rateLimitFailures.some((rf) => rf.itemKey === f.itemKey));
+
+    const retryConcurrency = Math.max(1, Math.floor(concurrency / 2));
+    const retryWorkers = Array.from({ length: retryConcurrency }).map(async (_, wi) => {
+      for (let i = wi; i < retryItems.length; i += retryConcurrency) {
+        await processOne(retryItems[i]);
+      }
+    });
+    await Promise.all(retryWorkers);
+    const retriedSuccess = retryItems.filter((r) => report.updated_items.some((u) => u.itemKey === r.itemKey)).length;
+    console.error(`[translation_backfill] retry pass result: ${retriedSuccess}/${retryItems.length} recovered`);
+  }
+
   report.timings = {
     translation_ms: Date.now() - startedAt,
   };

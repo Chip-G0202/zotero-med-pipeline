@@ -1,5 +1,6 @@
 // Must be first import: sets RESEARCH_OS_OVERRIDE_DATE from --date= CLI arg before stage modules load.
 import "./lib/date_override_bootstrap.mjs";
+import "./lib/env_file_bootstrap.mjs";
 
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -14,6 +15,7 @@ import { buildRuntimeConfig } from "./lib/runtime_config.mjs";
 import { evaluateRunInterval } from "./lib/schedule_support.mjs";
 import { filterDesktopReviewSourceByWritebackSummary } from "./lib/pipeline_stage_support.mjs";
 import { buildRunContext, buildOrchestratorReport, deriveWorkflowStatus, workflowStatusToExitCode } from "./lib/orchestrator_status.mjs";
+import { ensureWorkflowStartupReady } from "./lib/workflow_startup_ready.mjs";
 
 const AUTOMATION_NAME = "zotero-literature-filter";
 const MANUAL_BYPASS_REASON = "manual_bypass_interval_gate";
@@ -55,9 +57,13 @@ async function defaultRunStage(stage) {
   } catch (err) {
     const message = String(err?.stack || err?.message || err);
     stderr += message;
-    if (stage.name === "stage2_writeback") await markWritebackFailure(err);
-    if (stage.name === "stage3_translation") await markBackfillFailure(err);
-    if (stage.name === "stage4_exports") await markFinalizeExportsFailure(err);
+    try {
+      if (stage.name === "stage2_writeback") await markWritebackFailure(err);
+      if (stage.name === "stage3_translation") await markBackfillFailure(err);
+      if (stage.name === "stage4_exports") await markFinalizeExportsFailure(err);
+    } catch (markErr) {
+      stderr += "\n[orchestrator] markFailure also threw: " + String(markErr?.message || markErr);
+    }
     return { exitCode: stage.name === "stage3_translation" && /^partial_failed:/i.test(message) ? 2 : 1, stdout, stderr };
   } finally {
     process.stdout.write = originalWrite;
@@ -219,6 +225,7 @@ export async function runZoteroLiteratureFilter({
   config = buildRuntimeConfig(),
   runStage = defaultRunStage,
   runCommand = null,
+  ensureStartupReady = ensureWorkflowStartupReady,
   statArtifact = defaultStatArtifact,
   readJson = defaultReadJson,
   writeReport = defaultWriteReport,
@@ -243,6 +250,7 @@ export async function runZoteroLiteratureFilter({
   });
   const stages = [];
   const artifacts = {};
+  let startup = null;
   const baseStageRunner = runCommand
     ? async (stage) => runCommand(stage, config)
     : runStage;
@@ -294,6 +302,33 @@ export async function runZoteroLiteratureFilter({
     return report;
   }
 
+  try {
+    startup = await ensureStartupReady();
+  } catch (err) {
+    startup = {
+      ok: false,
+      errorCode: err?.code || "UNKNOWN",
+      error: String(err?.message || err),
+      failureClass: err?.details?.failureClass || null,
+      details: err?.details || null,
+    };
+    stages.push(skippedStage(stageDefs.stage1.name, stageDefs.stage1.scriptPath, "startup_failed", clock));
+    stages.push(skippedStage(stageDefs.mcpReady.name, stageDefs.mcpReady.scriptPath, "startup_failed", clock));
+    stages.push(skippedStage(stageDefs.stage2.name, stageDefs.stage2.scriptPath, "startup_failed", clock));
+    stages.push(skippedStage(stageDefs.stage3.name, stageDefs.stage3.scriptPath, "startup_failed", clock));
+    stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, "startup_failed", clock));
+    const report = buildOrchestratorReport({
+      status: "failed_due_to_config_or_dependency",
+      runContext,
+      finishedAt: iso(clock()),
+      stages,
+      artifacts,
+      extra: { startup },
+    });
+    await writeReport(report);
+    return report;
+  }
+
   stages.push(await executeStage(stageDefs.stage1, runSameProcessStage, clock));
   if (stage1Only && stages.at(-1).exitCode === 0) {
     stages.push(skippedStage(stageDefs.mcpReady.name, stageDefs.mcpReady.scriptPath, "stage1_only_mode", clock));
@@ -306,7 +341,7 @@ export async function runZoteroLiteratureFilter({
       finishedAt: iso(clock()),
       stages,
       artifacts,
-      extra: { stage1Only: true },
+      extra: { stage1Only: true, startup },
     });
     await writeReport(report);
     return report;
@@ -322,6 +357,7 @@ export async function runZoteroLiteratureFilter({
       finishedAt: iso(clock()),
       stages,
       artifacts,
+      extra: { startup },
     });
     await writeReport(report);
     return report;
@@ -340,6 +376,7 @@ export async function runZoteroLiteratureFilter({
       finishedAt: iso(clock()),
       stages,
       artifacts,
+      extra: { startup },
     });
     await writeReport(report);
     return report;
@@ -353,11 +390,12 @@ export async function runZoteroLiteratureFilter({
     stages.push(skippedStage(stageDefs.stage3.name, stageDefs.stage3.scriptPath, reason, clock));
     stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, reason, clock));
     const report = buildOrchestratorReport({
-      status: "failed_stage1",
+      status: "failed_stage2_writeback",
       runContext,
       finishedAt: iso(clock()),
       stages,
       artifacts,
+      extra: { startup },
     });
     await writeReport(report);
     return report;
@@ -392,11 +430,12 @@ export async function runZoteroLiteratureFilter({
     const reason = stage3.exitCode !== 0 && stage3.exitCode !== 2 ? "stage3_failed" : "translation_backfill_stale_or_missing";
     stages.push(skippedStage(stageDefs.stage4.name, stageDefs.stage4.scriptPath, reason, clock));
     const report = buildOrchestratorReport({
-      status: "failed_stage1",
+      status: "failed_stage3_translation",
       runContext,
       finishedAt: iso(clock()),
       stages,
       artifacts,
+      extra: { startup },
     });
     await writeReport(report);
     return report;
@@ -415,6 +454,7 @@ export async function runZoteroLiteratureFilter({
     finishedAt: iso(clock()),
     stages,
     artifacts,
+    extra: { startup },
   });
   await writeReport(report);
   return report;
@@ -422,6 +462,7 @@ export async function runZoteroLiteratureFilter({
 
 async function main() {
   const runMode = detectRunMode();
+  let orchestratorReportWritten = false;
   process.env.RESEARCH_OS_ORCHESTRATOR_TRIGGER = runMode.triggerMode;
   if (runMode.isManualOrForce) {
     process.env.RESEARCH_OS_FORCE_RUN = "true";
@@ -434,12 +475,43 @@ async function main() {
   }
   const overrideNow = overrideDateStr ? new Date(overrideDateStr) : undefined;
   const config = overrideNow ? buildRuntimeConfig({ now: overrideNow }) : buildRuntimeConfig();
-  const report = await runZoteroLiteratureFilter({ triggerMode: runMode.triggerMode, runMode, config });
+  let report;
+  try {
+    report = await runZoteroLiteratureFilter({ triggerMode: runMode.triggerMode, runMode, config });
+    orchestratorReportWritten = true;
+  } catch (orchestratorErr) {
+    // Emergency fallback: write a minimal report so downstream diagnostics work.
+    const pipelineDir = buildRuntimeConfig().pipelineDir;
+    const errMsg = String(orchestratorErr?.stack || orchestratorErr?.message || orchestratorErr);
+    try { process.stderr.write(`[orchestrator] runZoteroLiteratureFilter threw: ${errMsg}\n`); } catch {}
+    try {
+      await fs.mkdir(pipelineDir, { recursive: true });
+      const emergencyReport = {
+        status: "orchestrator_crash",
+        error: errMsg.slice(0, 2000),
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      };
+      await fs.writeFile(`${pipelineDir}/orchestrator_report.json`, JSON.stringify(emergencyReport, null, 2), "utf8");
+      orchestratorReportWritten = true;
+    } catch (writeErr) {
+      try { process.stderr.write(`[orchestrator] emergency report write also failed: ${writeErr}\n`); } catch {}
+    }
+    report = { status: "orchestrator_crash" };
+  }
   console.log(JSON.stringify(report, null, 2));
   process.exit(["completed", "completed_stage1_only", "degraded_due_to_mcp_unavailable", "skipped"].includes(report.status) ? 0 : 1);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+  // Catch unhandled promise rejections from inline stage handlers (e.g. mcp_bulk_writeback
+  // async operations that reject after the handler returns). Without this, the process
+  // crashes silently with exit code 1 and no orchestrator_report.json is written.
+  process.on("unhandledRejection", (reason) => {
+    const msg = reason?.stack || reason?.message || String(reason);
+    try { process.stderr.write(`[orchestrator] unhandledRejection: ${msg}\n`); } catch {}
+    process.exit(1);
+  });
   main().catch((err) => {
     console.error(err);
     process.exit(1);

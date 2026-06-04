@@ -15,9 +15,9 @@ Stage 2 / 3 进入的唯一功能 gate 是：**Zotero MCP `get_collections` JSON
 | 操作 | Windows | macOS | Linux |
 |------|---------|-------|-------|
 | 检测 Zotero 进程 | `tasklist` + `Get-Process` via pwsh | `ps -A -o comm=` | `ps -A -o comm=` |
-| 启动 Zotero | `powershell.exe Start-Process` / `schtasks` | `open -a Zotero` | `spawn(ZOTERO_EXE)` |
+| 启动 Zotero | `powershell.exe Start-Process` → `cmd.exe /c start` → detached `spawn(ZOTERO_EXE)`；`schtasks` 仅 legacy/manual | `open -a Zotero` | `spawn(ZOTERO_EXE)` |
 
-- `schtasks` / `powershell.exe` / `tasklist` / `cmd.exe` / `Start-Process` 仅在 win32 代码路径中调用。
+- `powershell.exe` / `tasklist` / `cmd.exe` / `Start-Process` 仅在 win32 代码路径中调用；`schtasks` 只保留为 legacy/manual compatibility path。
 - macOS 必须使用 `open` / `ps` 等效命令，不能调用 Windows-only 命令。
 - `ZOTERO_EXTERNAL_LAUNCHER=desktop_commander` 是 Windows-only 配置。macOS / Linux 不设置此值。
 
@@ -25,7 +25,7 @@ Stage 2 / 3 进入的唯一功能 gate 是：**Zotero MCP `get_collections` JSON
 
 - `runtime_config.mjs` 按平台解析 `zoteroExe`：
   - darwin → `/Applications/Zotero.app/Contents/MacOS/zotero`
-  - win32 → `zotero.exe`
+  - win32 → `D:/Zotero/zotero.exe`
   - linux → `zotero`（从 PATH 查找）
 - `ZOTERO_EXE` 环境变量在所有平台上优先级最高。
 - 如果可执行文件解析失败，脚本必须在 MCP 访问前停止并报告 `ZOTERO_EXE` 指导。
@@ -45,15 +45,23 @@ Stage 2 / 3 进入的唯一功能 gate 是：**Zotero MCP `get_collections` JSON
 - `inspectArtifact` 比较 artifact `mtime` 与 `stageStartedAt`。如果 `mtime < stageStartedAt`，artifact 标记为 `stale: true, currentRun: false`。
 - 每份报告包含 `runId` 用于跨运行 artifact 关联。
 
-## Agent/自动化启动顺序（Windows + Desktop Commander）
+## Agent/自动化启动顺序（默认 scheduled/background）
 
-仅在 Windows 且 Desktop Commander 可用时：
+默认 scheduled/background 路径不再依赖 Windows scheduled task；Desktop Commander 只作为 `process_permission_denied` 后的第三兜底：
 
-1. Agent tool `mcp__desktop_commander__.start_process` 运行 `schtasks /Run /TN StartZoteroForCodexOnly`
-2. 等待 3000ms
-3. 设置 `ZOTERO_EXTERNAL_LAUNCHER=desktop_commander`
-4. 运行 `node --env-file=.env tools/run_zotero_literature_filter.mjs`
+1. Agent layer 只设置 workflow control env：`ZOTERO_PROJECT_ROOT`、`DESKTOP_REVIEW_ROOT`、`ZOTERO_EXE`、`RESEARCH_OS_ORCHESTRATOR_TRIGGER`、`RESEARCH_OS_RUN_INTERVAL_DAYS`
+2. 不设置 `ZOTERO_EXTERNAL_LAUNCHER=desktop_commander`
+3. 首先运行单入口：`node --env-file=.env tools/run_zotero_literature_filter.mjs --trigger=scheduled`
+4. 如果 report 是 `skipped / interval_not_reached`，停止，不启动依赖
+5. 如果 report 是 `failed_due_to_config_or_dependency` 且 `startup.failureClass=process_permission_denied`，再用 `mcp__desktop_commander__.start_process` 从项目根目录运行 `node --env-file=.env tools/start_workflow_dependencies.mjs`
+6. Desktop Commander prewarm 成功后，单入口只允许重跑一次
 
-独立 cron/本地自动化可在 Desktop Commander 不可用时使用本地 shell fallback，仅限相同的 `schtasks /Run /TN StartZoteroForCodexOnly` 命令。
+`StartZoteroForCodexOnly` 只保留为 legacy/manual compatibility path；Desktop Commander 不能运行旧 scheduled task，只能在 permission-denied third fallback 中运行仓库 startup CLI。
+
+启动成功标准：
+
+- Zotero ready = Zotero MCP `get_collections` JSON-RPC probe 成功
+- Ollama ready = `GET http://127.0.0.1:11434/api/tags` 成功
+- Zotero 启动后固定等待 3000ms，再执行 bounded MCP polling
 
 详见 `tools/lib/ensure_zotero_mcp_ready.mjs`（probe 实现）。

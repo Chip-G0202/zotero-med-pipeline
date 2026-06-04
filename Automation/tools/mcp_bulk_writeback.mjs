@@ -15,6 +15,11 @@ import {
 import { LABELS } from "./lib/triage_policy.mjs";
 import { ensureZoteroMcpReady } from "./lib/ensure_zotero_mcp_ready.mjs";
 import { buildRuntimeConfig } from "./lib/runtime_config.mjs";
+import {
+  buildZoteroCollectionGuard,
+  recordCollectionScopeBlock,
+  summarizeCollectionScopeBlocks,
+} from "./lib/zotero_collection_guard.mjs";
 
 const RUNTIME = buildRuntimeConfig();
 const ROOT = RUNTIME.projectRoot;
@@ -99,21 +104,32 @@ async function ensureMcpReady() {
   });
 }
 
-async function findRootCollection() {
-  const result = await mcpToolCall("get_collections", { mode: "complete", limit: 500 }, 1);
+async function ensureTopCollectionByName(name, callIdBase = 20) {
+  const result = await mcpToolCall("get_collections", { mode: "complete", limit: 1000 }, callIdBase);
   const list = parseToolText(result);
-  const exact = list.filter((x) => x.name === "文献池");
-  if (exact.length === 0) {
-    const err = new Error("POOL_COLLECTION_MISSING: 未找到唯一根集合 文献池");
-    err.details = { signal: "pool_collection_missing" };
-    throw err;
-  }
+  const exact = (Array.isArray(list) ? list : []).filter((x) => x.name === name && !(x.parentCollection || x.parent));
+  if (exact.length === 1) return exact[0];
   if (exact.length > 1) {
-    const err = new Error("POOL_COLLECTION_AMBIGUOUS: 存在多个同名 文献池");
-    err.details = { signal: "pool_collection_ambiguous", keys: exact.map((x) => x.key) };
+    const signal = name === "文献池" ? "pool_collection_ambiguous" : "top_collection_ambiguous";
+    const err = new Error(`TOP_COLLECTION_AMBIGUOUS: 存在多个同名顶层集合 ${name}`);
+    err.details = { signal, name, keys: exact.map((x) => x.key) };
     throw err;
   }
-  return exact[0];
+  const created = parseToolText(await mcpToolCall("create_collection", { name }, callIdBase + 1));
+  return created;
+}
+
+async function findTopCollectionByName(name) {
+  const result = await mcpToolCall("get_collections", { mode: "complete", limit: 1000 }, 2);
+  const list = parseToolText(result);
+  const exact = (Array.isArray(list) ? list : []).filter((x) => x.name === name && !(x.parentCollection || x.parent));
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) {
+    const err = new Error(`TOP_COLLECTION_AMBIGUOUS: 存在多个同名顶层集合 ${name}`);
+    err.details = { signal: "top_collection_ambiguous", name, keys: exact.map((x) => x.key) };
+    throw err;
+  }
+  return null;
 }
 
 async function findCollectionByName(name) {
@@ -122,14 +138,28 @@ async function findCollectionByName(name) {
   return list.find((x) => x.name === name) || null;
 }
 
-async function ensureRootCollectionByName(name, callIdBase = 20) {
-  const existing = await findCollectionByName(name);
-  if (existing) return existing;
-  const created = parseToolText(await mcpToolCall("create_collection", { name }, callIdBase));
-  return created;
+async function buildCollectionGuard(rootKey) {
+  const top = parseToolText(await mcpToolCall("get_collections", { mode: "complete", limit: 1000 }, 3));
+  const collections = Array.isArray(top) ? [...top] : [];
+  if (rootKey) {
+    try {
+      const descendants = parseToolText(await mcpToolCall("get_subcollections", { collectionKey: rootKey, recursive: true }, 4));
+      if (Array.isArray(descendants)) collections.push(...descendants);
+    } catch {
+      // Guard still fails closed if required collections cannot be resolved.
+    }
+  }
+  return buildZoteroCollectionGuard(collections);
 }
 
-async function ensureChildCollection(parentKey, name, callIdBase) {
+async function ensureChildCollection(parentKey, name, callIdBase, { collectionGuard = null, collectionScopeBlocks = null } = {}) {
+  if (collectionGuard) {
+    const check = collectionGuard.checkCollectionKey(parentKey, { action: "create_collection", role: "parent" });
+    if (!check.ok) {
+      recordCollectionScopeBlock(collectionScopeBlocks, check, { target_name: name });
+      throw new Error(`collection_scope_blocked:create_collection:${check.reason}`);
+    }
+  }
   const children = parseToolText(await mcpToolCall("get_subcollections", { collectionKey: parentKey, recursive: false }, callIdBase));
   const existing = children.find((x) => x.name === name);
   if (existing) return existing.key;
@@ -382,7 +412,7 @@ function isItemValidForMigration(data) {
   return Boolean(title && hasIdentifier);
 }
 
-export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, starMigrationConfig }) {
+export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, starMigrationConfig, collectionGuard = null, collectionScopeBlocks = null }) {
   const migrationConfig = starMigrationConfig || { enabled: true, mode: "legacy", expandAllGrades: false, windowDays: 7, starThreshold: 4 };
   const stats = {
     skipped: !migrationConfig.enabled,
@@ -418,6 +448,19 @@ export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, 
     stats.skipped = true;
     stats.reason = "worthy_collection_missing";
     return stats;
+  }
+
+  if (collectionGuard) {
+    const worthyCheck = collectionGuard.checkCollectionKey(worthyKey, { action: "add_items_to_collection", role: "worthy_target" });
+    const rootCheck = collectionGuard.checkCollectionKey(rootKey, { action: "remove_items_from_collection", role: "root_pool" });
+    for (const check of [worthyCheck, rootCheck]) {
+      if (check.ok) continue;
+      stats.skipped = true;
+      stats.reason = `collection_scope_blocked:${check.reason}`;
+      const block = recordCollectionScopeBlock(collectionScopeBlocks, check, { phase: "star_migration" });
+      stats.errors.push(block);
+    }
+    if (stats.skipped) return stats;
   }
 
   const tree = parseToolText(await mcpToolCall("get_subcollections", { collectionKey: rootKey, recursive: true }, 660000));
@@ -479,6 +522,15 @@ export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, 
       }
 
       try {
+        if (collectionGuard) {
+          const check = collectionGuard.checkCollectionKey(worthyKey, { action: "add_items_to_collection", role: "worthy_target" });
+          if (!check.ok) {
+            const block = recordCollectionScopeBlock(collectionScopeBlocks, check, { itemKey, phase: "add_to_worthy" });
+            stats.errors.push(block);
+            stats.add_failures.push(block);
+            continue;
+          }
+        }
         await mcpToolCall("add_items_to_collection", { collectionKey: worthyKey, itemKeys: [itemKey] }, 700000 + stats.eligible_items);
         worthyItems.add(itemKey);
         stats.moved_to_worthy += 1;
@@ -498,6 +550,15 @@ export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, 
 
       for (const collectionKey of collectionsToRemove) {
         try {
+          if (collectionGuard) {
+            const check = collectionGuard.checkCollectionKey(collectionKey, { action: "remove_items_from_collection", role: collectionRoleByKey.get(collectionKey) || "date_subcollection" });
+            if (!check.ok) {
+              const block = recordCollectionScopeBlock(collectionScopeBlocks, check, { itemKey, phase: "remove_from_day_collections" });
+              stats.errors.push(block);
+              stats.removal_failures.push(block);
+              continue;
+            }
+          }
           await mcpToolCall("remove_items_from_collection", { collectionKey, itemKeys: [itemKey] }, 710000 + stats.removed_from_source_collections + stats.removed_from_grade_collections);
           if (collectionRoleByKey.get(collectionKey) === "source") {
             stats.removed_from_source_collections += 1;
@@ -512,6 +573,15 @@ export async function migrateRatedItems({ rootKey, worthyKey, now, mcpToolCall, 
 
       // Also remove from root pool to keep root and date subcollections in sync
       try {
+        if (collectionGuard) {
+          const check = collectionGuard.checkCollectionKey(rootKey, { action: "remove_items_from_collection", role: "root_pool" });
+          if (!check.ok) {
+            const block = recordCollectionScopeBlock(collectionScopeBlocks, check, { itemKey, phase: "remove_from_root_pool" });
+            stats.errors.push(block);
+            stats.removal_failures.push(block);
+            continue;
+          }
+        }
         await mcpToolCall("remove_items_from_collection", { collectionKey: rootKey, itemKeys: [itemKey] }, 720000 + stats.removed_from_root_pool);
         stats.removed_from_root_pool += 1;
       } catch (error) {
@@ -542,9 +612,8 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
   const offset = offsetArg ? Number(offsetArg.split("=")[1]) : 0;
   const inputFileArg = argv.find((x) => x.startsWith("--input-file="));
   const inputFile = inputFileArg ? inputFileArg.split("=")[1] : null;
-  const isolatedCalibration = process.env.ZOTERO_WRITEBACK_CALIBRATION_ISOLATED === "1";
-  const isolatedCollectionName = process.env.ZOTERO_WRITEBACK_CALIBRATION_COLLECTION || "Concurrency Calibration Test";
   const starMigrationConfig = parseStarMigrationConfig();
+  const collectionScopeBlocks = [];
 
   const triaged = inputFile
     ? JSON.parse(await fs.readFile(inputFile, "utf8"))
@@ -552,22 +621,40 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
   const itemsAll = (limit ? triaged.slice(offset, offset + limit) : triaged.slice(offset));
   const items = itemsAll.filter((x) => x.grade !== "D");
 
-  const root = isolatedCalibration ? await ensureRootCollectionByName(isolatedCollectionName, 21) : await findRootCollection();
-  let worthy = null;
-  if (!isolatedCalibration) {
-    const existingWorthy = await findCollectionByName("值得精读");
-    worthy = existingWorthy || { key: await ensureChildCollection(root.key, "值得精读", 52), name: "值得精读" };
+  const root = await ensureTopCollectionByName("文献池", 20);
+  let collectionGuard = await buildCollectionGuard(root.key);
+  if (!collectionGuard.ready) {
+    const err = new Error(`collection_scope_blocked:${collectionGuard.rootIssue || "guard_not_ready"}`);
+    err.details = collectionGuard.audit;
+    throw err;
   }
-  const poolIndex = isolatedCalibration
-    ? { byDoi: new Map(), byPmid: new Map(), byPmcid: new Map(), byArxiv: new Map(), byTitle: new Map(), meta: new Map() }
-    : await buildPoolIndex(root.key);
+  const trashKey = await ensureChildCollection(root.key, "待删除", 48, { collectionGuard, collectionScopeBlocks });
+  collectionGuard = await buildCollectionGuard(root.key);
+  const worthy = await ensureTopCollectionByName("值得精读", 52);
+  collectionGuard = await buildCollectionGuard(root.key);
+  const requiredBaseChecks = [
+    collectionGuard.checkCollectionKey(root.key, { action: "create_collection", role: "root_pool" }),
+    collectionGuard.checkCollectionKey(trashKey, { action: "create_collection", role: "trash_collection" }),
+    collectionGuard.checkCollectionKey(worthy?.key, { action: "create_collection", role: "worthy_collection" }),
+  ];
+  const blockedBaseChecks = requiredBaseChecks.filter((check) => !check.ok);
+  for (const check of blockedBaseChecks) recordCollectionScopeBlock(collectionScopeBlocks, check, { phase: "base_collection_validation" });
+  if (blockedBaseChecks.length) {
+    const err = new Error(`collection_scope_blocked: base collection outside managed scope (${blockedBaseChecks[0].reason})`);
+    err.details = {
+      ...collectionGuard.audit,
+      ...summarizeCollectionScopeBlocks(collectionScopeBlocks),
+    };
+    throw err;
+  }
+  const poolIndex = await buildPoolIndex(root.key);
 
   // 构建"待删除"去重索引：已在待删除集合中的条目同样不入库
   let trashIndex = { byDoi: new Map(), byPmid: new Map(), byPmcid: new Map(), byArxiv: new Map(), byTitle: new Map(), meta: new Map() };
   let trashItemCount = 0;
   try {
-    const rootChildren = parseToolText(await mcpToolCall("get_subcollections", { collectionKey: root.key, recursive: true }, 534000));
-    const trashCollection = rootChildren.find((x) => x.name === "待删除");
+    const rootChildren = parseToolText(await mcpToolCall("get_subcollections", { collectionKey: root.key, recursive: false }, 534000));
+    const trashCollection = (Array.isArray(rootChildren) ? rootChildren : []).find((x) => x.key === trashKey);
     if (trashCollection) {
       const trashKeys = await getCollectionItemKeys(trashCollection.key, 535000);
       for (let ti = 0; ti < trashKeys.length; ti++) {
@@ -602,7 +689,7 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
   let worthyIndex = { byDoi: new Map(), byPmid: new Map(), byPmcid: new Map(), byArxiv: new Map(), byTitle: new Map(), meta: new Map() };
   let worthyItemCount = 0;
   try {
-    const worthyCollection = worthy || await findCollectionByName("值得精读");
+    const worthyCollection = worthy || await findTopCollectionByName("值得精读");
     if (worthyCollection?.key) {
       const worthyKeys = await getCollectionItemKeys(worthyCollection.key, 538000);
       for (let wi = 0; wi < worthyKeys.length; wi++) {
@@ -633,23 +720,33 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
     // 值得精读集合不存在或无法访问时忽略
   }
 
-  const dateKey = isolatedCalibration ? root.key : await ensureChildCollection(root.key, dateStr, 50);
+  const dateKey = await ensureChildCollection(root.key, dateStr, 50, { collectionGuard, collectionScopeBlocks });
+  collectionGuard = await buildCollectionGuard(root.key);
 
   const sourceKeys = {};
   const gradeKeys = {};
-  if (isolatedCalibration) {
-    sourceKeys[SOURCE_COLLECTIONS.rss] = root.key;
-    sourceKeys[SOURCE_COLLECTIONS.database] = root.key;
-    gradeKeys[LABELS.A] = root.key;
-    gradeKeys[LABELS.B] = root.key;
-    gradeKeys[LABELS.C] = root.key;
-  } else {
-    for (const name of Object.values(SOURCE_COLLECTIONS)) {
-      sourceKeys[name] = await ensureChildCollection(dateKey, name, 100 + Object.keys(sourceKeys).length * 2);
-    }
-    for (const name of Object.values(GRADE_COLLECTIONS)) {
-      gradeKeys[name] = await ensureChildCollection(dateKey, name, 200 + Object.keys(gradeKeys).length * 2);
-    }
+  for (const name of Object.values(SOURCE_COLLECTIONS)) {
+    sourceKeys[name] = await ensureChildCollection(dateKey, name, 100 + Object.keys(sourceKeys).length * 2, { collectionGuard, collectionScopeBlocks });
+  }
+  collectionGuard = await buildCollectionGuard(root.key);
+  for (const name of Object.values(GRADE_COLLECTIONS)) {
+    gradeKeys[name] = await ensureChildCollection(dateKey, name, 200 + Object.keys(gradeKeys).length * 2, { collectionGuard, collectionScopeBlocks });
+  }
+  collectionGuard = await buildCollectionGuard(root.key);
+  const requiredTargetChecks = [
+    { key: root.key, action: "add_items_to_collection", role: "root_pool" },
+    ...Object.values(sourceKeys).map((key) => ({ key, action: "add_items_to_collection", role: "source_collection" })),
+    ...Object.values(gradeKeys).map((key) => ({ key, action: "add_items_to_collection", role: "grade_collection" })),
+  ].map((entry) => collectionGuard.checkCollectionKey(entry.key, { action: entry.action, role: entry.role }));
+  const blockedRequiredTargets = requiredTargetChecks.filter((check) => !check.ok);
+  for (const check of blockedRequiredTargets) recordCollectionScopeBlock(collectionScopeBlocks, check, { phase: "writeback_target_validation" });
+  if (blockedRequiredTargets.length) {
+    const err = new Error(`collection_scope_blocked: writeback target outside managed scope (${blockedRequiredTargets[0].reason})`);
+    err.details = {
+      ...collectionGuard.audit,
+      ...summarizeCollectionScopeBlocks(collectionScopeBlocks),
+    };
+    throw err;
   }
   const collectionSetupMs = Date.now() - collectionSetupStarted;
 
@@ -989,6 +1086,8 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
       batchSize: attachBatchSize,
       mcpToolCall,
       idBase: 30000,
+      collectionGuard,
+      collectionScopeBlocks,
     });
   const dailyAttachStats = stopForHighRisk
     ? {
@@ -1003,6 +1102,8 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
       batchSize: attachBatchSize,
       mcpToolCall,
       idBase: 33000,
+      collectionGuard,
+      collectionScopeBlocks,
     });
   const attachStats = {
     collection_attach_mode: "batch",
@@ -1021,15 +1122,12 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
   const collectionAttachMs = Date.now() - collectionAttachStarted;
 
   const tagCleanupStarted = Date.now();
-  const tagCleanupStats = isolatedCalibration
-    ? { skipped: true, reason: "isolated_calibration_mode" }
-    : await cleanupSignatureTags(root.key, worthy?.key || null, { now: TODAY, mcpToolCall });
+  const tagCleanupStats = await cleanupSignatureTags(root.key, worthy?.key || null, { now: TODAY, mcpToolCall });
   const tagCleanupMs = Date.now() - tagCleanupStarted;
   const migrationStarted = Date.now();
-  const migrationStats = isolatedCalibration
-    ? { skipped: true, reason: "isolated_calibration_mode", enabled: false, mode: "disabled", eligible_items: 0, moved_to_worthy: 0, skipped_invalid: 0, skipped_already_exists: 0, errors: [] }
-    : await migrateRatedItems({ rootKey: root.key, worthyKey: worthy?.key || null, now: TODAY, mcpToolCall, starMigrationConfig });
+  const migrationStats = await migrateRatedItems({ rootKey: root.key, worthyKey: worthy?.key || null, now: TODAY, mcpToolCall, starMigrationConfig, collectionGuard, collectionScopeBlocks });
   const migrationMs = Date.now() - migrationStarted;
+  const collectionScopeSummary = summarizeCollectionScopeBlocks(collectionScopeBlocks);
   const summary = {
     date: dateStr,
     root_collection: root,
@@ -1040,6 +1138,8 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
     failures,
     pool_collection_name: "文献池",
     pool_collection_key: root.key,
+    ...collectionGuard.audit,
+    ...collectionScopeSummary,
     pool_items_scanned: Number(poolIndex.meta?.size || 0),
     pool_duplicate_index_counts: {
       doi: poolIndex.byDoi?.size || 0,
@@ -1072,8 +1172,9 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
       tag_cleanup_interface: "write_tag:set",
       historical_dedup_enabled: true,
       star_migration_window_days: migrationStats.window_days || starMigrationConfig.windowDays || 7,
-      calibration_isolated_mode: isolatedCalibration,
+      calibration_isolated_mode: false,
       history_collection_modification_forbidden: HISTORY_COLLECTION_MODIFICATION_FORBIDDEN,
+      ...collectionGuard.audit,
     },
     tag_cleanup_stats: tagCleanupStats,
     migration_stats: migrationStats,
@@ -1115,6 +1216,8 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
       duplicate_prevented_count: duplicatePreventedCount,
       duplicate_detected_count: duplicateDetectedCount,
       wrong_collection_detected_count: wrongCollectionDetectedCount,
+      collection_scope_blocked_count: collectionScopeSummary.collection_scope_blocked_count,
+      collection_scope_blocked_samples: collectionScopeSummary.collection_scope_blocked_samples,
       uncertain_create_state_count: uncertainCreateStateCount,
       in_flight_dedupe_wait_count: inFlightDedupeWaitCount,
       collection_key_cache_enabled: true,
@@ -1161,6 +1264,10 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
     runReport.writeback_added_to_current_date_collection = counters.added_to_daily_collection;
     runReport.writeback_pool_add_failed = poolAddFailed;
     runReport.writeback_current_date_add_failed = currentDateAddFailed;
+    runReport.collection_scope_guard_enabled = true;
+    runReport.collection_scope_guard_ready = collectionGuard.ready;
+    runReport.collection_scope_blocked_count = collectionScopeSummary.collection_scope_blocked_count;
+    runReport.collection_scope_blocked_samples = collectionScopeSummary.collection_scope_blocked_samples;
     runReport.signals = runReport.signals || {};
     runReport.signals.pool_collection_missing = false;
     runReport.signals.pool_collection_ambiguous = false;
@@ -1172,6 +1279,7 @@ export async function runMcpBulkWriteback({ argv = process.argv } = {}) {
     runReport.signals.pool_add_failed = poolAddFailed > 0;
     runReport.signals.current_date_add_failed = currentDateAddFailed > 0;
     runReport.signals.history_collection_modification_forbidden = HISTORY_COLLECTION_MODIFICATION_FORBIDDEN;
+    runReport.signals.collection_scope_blocked = collectionScopeSummary.collection_scope_blocked_count > 0;
     await fs.writeFile(runReportPath, JSON.stringify(runReport, null, 2), "utf8");
   } catch {}
   console.log(JSON.stringify(summary, null, 2));
@@ -1198,7 +1306,11 @@ export async function markWritebackFailure(err) {
     runReport.signals = runReport.signals || {};
     runReport.signals.pool_collection_missing = details?.signal === "pool_collection_missing";
     runReport.signals.pool_collection_ambiguous = details?.signal === "pool_collection_ambiguous";
+    runReport.signals.collection_scope_blocked = details?.signal === "collection_scope_blocked" || /collection_scope_blocked/i.test(reason);
     runReport.signals.history_collection_modification_forbidden = HISTORY_COLLECTION_MODIFICATION_FORBIDDEN;
+    runReport.collection_scope_guard_enabled = true;
+    runReport.collection_scope_blocked_count = Number(details?.collection_scope_blocked_count || 0);
+    runReport.collection_scope_blocked_samples = details?.collection_scope_blocked_samples || [];
     runReport.steps.med_zotero_bridge = {
       ok: false,
       mcp_required: true,
