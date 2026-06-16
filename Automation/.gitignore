@@ -1,0 +1,64 @@
+# Secrets and local env
+.env
+.env.*.local
+*.pem
+*.key
+*secret*
+*token*.json
+secrets.json
+config.local.json
+config.private.json
+
+# Personal runtime data (NOT for public repo)
+research_os/
+.screening_standards.last_synced.md
+
+# Binary files
+screening_standards.docx
+
+# Tests with hardcoded local paths
+tests/
+!tests/
+tests/*
+!tests/journal_quality_gate.test.mjs
+!tests/monthly_docx_report.test.mjs
+!tests/monthly_structure_compat.test.mjs
+!tests/report_period_support.test.mjs
+
+# Personal release materials
+public_release/
+
+# Variant files (merged into canonical names)
+*-github.md
+*-github.mjs
+
+# Logs and caches
+logs/
+*.log
+.cache/
+.tmp*/
+
+# Node
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Personal safety test
+tools/_test_safety.mjs
+
+# Config example (redundant with .env.example and config README)
+config.example.json
+
+# Release notes (not part of the pipeline)
+RELEASE_NOTES_v2.0.md
+
+# Python cache
+__pycache__/
+*.py[cod]
+_force_run.cmd
