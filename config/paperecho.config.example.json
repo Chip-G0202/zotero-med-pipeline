@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "mode": null,
+  "profile": "standard",
+  "common": {
+    "projectRoot": "..",
+    "journalQualityApiKeyEnv": "EASYSCHOLAR_SECRET_KEY",
+    "llm": {
+      "enabled": true,
+      "mode": null,
+      "requireRealModel": false,
+      "preferenceApiKeyEnv": "PREFERENCE_LEARNING_API_KEY",
+      "translationApiKeyEnv": "TITLE_TRANSLATION_API_KEY",
+      "preferenceConfig": "preference_learning.config.json",
+      "translationConfig": "title_translation.config.json"
+    },
+    "email": {
+      "enabled": false,
+      "recipient": null,
+      "smtp": {
+        "host": null,
+        "user": null,
+        "passwordEnv": "SMTP_PASS",
+        "port": 465,
+        "secure": true,
+        "from": null
+      }
+    },
+    "cleanup": {
+      "enabled": true,
+      "retentionDays": 30
+    }
+  },
+  "desktop": {
+    "enabled": false,
+    "zoteroExe": null,
+    "cliTool": "zotero-cli",
+    "writebackBatchSize": 50,
+    "startupRetries": 45,
+    "startupIntervalMs": 1000,
+    "postStartDelayMs": 5000
+  },
+  "web": {
+    "enabled": false,
+    "apiKeyEnv": "ZOTERO_API_KEY",
+    "userId": null,
+    "apiBase": "https://api.zotero.org",
+    "requestConcurrency": 4
+  },
+  "local": {
+    "enabled": false,
+    "input": null,
+    "outputRoot": null,
+    "feedback": null
+  }
+}

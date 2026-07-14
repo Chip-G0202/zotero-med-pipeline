@@ -1,4 +1,0 @@
-interface:
-  display_name: "med-daily-triage"
-  short_description: "v1.3 update"
-  default_prompt: "Use this public med workflow skill."

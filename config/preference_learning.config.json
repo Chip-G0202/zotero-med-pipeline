@@ -1,0 +1,18 @@
+{
+  "endpoint": "https://api.xiaomimimo.com/v1/chat/completions",
+  "model": "mimo-v2.5",
+  "temperature": 0.1,
+  "top_p": 0.9,
+  "stream": false,
+  "thinking": false,
+  "timeout_ms": 120000,
+  "max_retries": 3,
+  "max_output_tokens": 4000,
+  "user_id": "zotero-mcp-literature-workflow",
+  "response_format": "json_schema",
+  "prompt_file": "config/prompt-preference-learning.md",
+  "api_key_env_fallback_order": [
+    "PREFERENCE_LEARNING_API_KEY",
+    "TITLE_TRANSLATION_API_KEY"
+  ]
+}

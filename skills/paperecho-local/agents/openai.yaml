@@ -1,0 +1,5 @@
+interface:
+  display_name: "PaperEcho - Local"
+  short_description: "Standalone local literature tracking workflow"
+  brand_color: "#2563EB"
+  default_prompt: "Use $paperecho-local to run or improve the standalone local literature workflow without Zotero."

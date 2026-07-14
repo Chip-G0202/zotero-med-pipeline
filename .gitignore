@@ -1,0 +1,118 @@
+# Secrets and local env
+.env
+.env.backup
+.env.backup.*
+.env.*.local
+*.pem
+*.key
+*secret*
+*token*.json
+secrets.json
+config.local.json
+config.private.json
+/config/paperecho.config.json
+
+# Personal runtime data (NOT for public repo)
+research_os/
+.screening_standards.last_synced.md
+
+# Binary files
+screening_standards.docx
+
+# Tests with hardcoded local paths
+tests/
+!tests/
+tests/*
+!tests/.gitignore
+!tests/full_workflow_benchmark/
+!tests/full_workflow_benchmark/**
+!tests/helpers/
+!tests/helpers/**
+!tests/journal_quality_gate.test.mjs
+!tests/monthly_docx_report.test.mjs
+!tests/monthly_structure_compat.test.mjs
+!tests/report_period_support.test.mjs
+!tests/llm_rule_context.test.mjs
+!tests/llm_workflow.test.mjs
+!tests/mcp_bulk_writeback.test.mjs
+!tests/mcp_translation_backfill.test.mjs
+!tests/candidate_sampling.test.mjs
+!tests/desktop_review_source.test.mjs
+!tests/doi_normalization.test.mjs
+!tests/fix_dirty_publication_titles.test.mjs
+!tests/pipeline_fixture_input.test.mjs
+!tests/pipeline_smoke.test.mjs
+!tests/runtime_safety_config.test.mjs
+!tests/semantic_grading.test.mjs
+!tests/screening_standards_file.test.mjs
+!tests/spreadsheet_adapter_compat.test.mjs
+!tests/stage4_no_write_fallback.test.mjs
+!tests/unified_pending_rule_suggestions.test.mjs
+!tests/workflow_classifier.test.mjs
+
+# Personal release materials
+public_release/
+
+# Variant files (merged into canonical names)
+*-github.md
+*-github.mjs
+
+# Logs and caches
+logs/
+*.log
+.cache/
+.tmp*/
+temp/
+
+# Node
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Personal safety test
+tools/_test_safety.mjs
+
+# Config example (redundant with .env.example and config README)
+config.example.json
+
+# Release notes (not part of the pipeline)
+RELEASE_NOTES_v2.0.md
+
+# Python cache
+__pycache__/
+*.py[cod]
+_force_run.cmd
+!tests/zotero_backend.test.mjs
+
+!tests/preference_refinement.test.mjs
+
+.e2e-backup/
+
+# Local workflow outputs
+docs/zotero-cli-probe-results.json
+review_results/pipeline/
+review_results/run_manifests/
+review_results/zotero_index/
+review_results/journal_quality_cache.json
+review_results/文献评价/[0-9][0-9].*/
+review_results/文献评价/screening_standards.backup.docx
+
+# Generated workflow validation and runtime state
+/review_results/desktop_e2e/
+/review_results/web_e2e/
+/review_results/stage2_benchmark/
+/review_results/stage2_benchmark_startup/
+/review_results/local/
+/review_results/shared/current_literature_index.json
+/review_results/runtime_state.json
+/review_results/translation_cache.json
+/review_results/manual_cleanup/
+/review_results/full_workflow_cleanup_summary.json
+/review_results/**/*.tmp
+/review_results/**/*.lock

@@ -1,0 +1,12 @@
+{
+  "research_domain": "mixed_biomedical_technical",
+  "domain_options": {
+    "biomedical": { "primary_sources": ["pubmed_pmc"], "supplemental_sources": ["rss"] },
+    "non_biomedical_stem": { "primary_sources": ["openalex"], "supplemental_sources": ["rss"] },
+    "education_social_science": { "primary_sources": ["openalex"], "supplemental_sources": ["rss"] },
+    "mixed_biomedical_technical": { "primary_sources": ["pubmed_pmc", "openalex"], "supplemental_sources": ["rss"] },
+    "unknown": { "primary_sources": [], "supplemental_sources": ["rss"] }
+  },
+  "override_enabled_sources": null,
+  "require_manual_confirmation": false
+}

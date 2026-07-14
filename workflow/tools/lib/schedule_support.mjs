@@ -1,0 +1,155 @@
+const ASIA_SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const SLOT_HOUR_LOCAL = 15;
+
+// Central ownership map for runtime_state.json fields that influence scheduling
+// or stateful stage gates. Keep this descriptive only; do not migrate or rename
+// persisted runtime_state fields here.
+export const RUNTIME_STATE_FIELD_OWNERSHIP = Object.freeze({
+  last_successful_full_run_at: Object.freeze({
+    semantics: "Timestamp recorded after a scheduled/background complete workflow finishes successfully; manual runs do not advance scheduled cadence.",
+    owner: "Stage 4 final export success path",
+    usage: "Reference field for the outer orchestrator interval gate.",
+    write_boundary: "Write only after scheduled/background final export succeeds; manual success writes last_successful_manual_run_at instead.",
+  }),
+  last_accepted_planned_slot_at: Object.freeze({
+    semantics: "Planned slot accepted and processed by Stage 1.",
+    owner: "Stage 1 pipeline",
+    usage: "Reference field for the Stage 1 internal interval gate.",
+    write_boundary: "Stage 1 owns accepted-slot state; Stage 4 currently mirrors current_planned_slot_at for compatibility.",
+  }),
+  last_translation_pool_scan_at: Object.freeze({
+    semantics: "Most recent Stage 3 translation pool scan execution time.",
+    owner: "Stage 3 translation backfill",
+    usage: "Controls or records translation pool scan cadence.",
+    write_boundary: "Write only when the Stage 3 pool scan executes.",
+  }),
+  last_translation_pool_scan_planned_slot_at: Object.freeze({
+    semantics: "Legacy planned-slot field for translation pool scan state.",
+    owner: "Legacy Stage 3 translation backfill",
+    usage: "Legacy audit context only; no active reader should depend on it.",
+    write_boundary: "Legacy field; no longer written. Do not delete historical persisted values.",
+    legacy: true,
+  }),
+});
+
+export function buildRuntimeStateDiagnostics({
+  referenceStateField = null,
+  writtenStateFields = [],
+} = {}) {
+  const fieldOwnership = {};
+  for (const field of Object.keys(RUNTIME_STATE_FIELD_OWNERSHIP)) {
+    fieldOwnership[field] = RUNTIME_STATE_FIELD_OWNERSHIP[field];
+  }
+  return {
+    reference_state_field: referenceStateField,
+    written_state_fields: Array.isArray(writtenStateFields) ? [...writtenStateFields] : [],
+    field_ownership: fieldOwnership,
+  };
+}
+
+export function resolveRuntimeStateReference(runtimeState = {}, referenceFields = []) {
+  for (const field of referenceFields) {
+    const value = runtimeState?.[field];
+    if (value) {
+      return {
+        reference_state_field: field,
+        last_reference_time: value,
+      };
+    }
+  }
+  return {
+    reference_state_field: null,
+    last_reference_time: null,
+  };
+}
+
+export function buildIntervalGateDiagnostics({
+  gateName,
+  trigger = "unknown",
+  forceRun = false,
+  manualTrigger = "unknown",
+  intervalInfo = {},
+  referenceStateField = null,
+  lastReferenceTime = null,
+  skipReason = "",
+  source = "",
+  writtenStateFields = [],
+} = {}) {
+  return {
+    gate_name: gateName || "unknown_interval_gate",
+    trigger: String(trigger || "unknown") || "unknown",
+    force_run: Boolean(forceRun),
+    manual_trigger: manualTrigger,
+    interval_days: intervalInfo.run_interval_days,
+    reference_state_field: referenceStateField,
+    last_reference_time: lastReferenceTime || null,
+    runtime_state_diagnostics: buildRuntimeStateDiagnostics({
+      referenceStateField,
+      writtenStateFields,
+    }),
+    planned_slot: intervalInfo.current_planned_slot_at || null,
+    run_due: Boolean(intervalInfo.run_due),
+    skipped_due_to_interval: Boolean(intervalInfo.skipped_due_to_interval),
+    skip_reason: skipReason || "",
+    next_eligible_run_at: intervalInfo.next_eligible_run_at || "unknown",
+    source,
+  };
+}
+
+function toBeijingDate(date) {
+  return new Date(date.getTime() + ASIA_SHANGHAI_OFFSET_MS);
+}
+
+export function resolvePlannedSlotAt(date) {
+  const bj = toBeijingDate(new Date(date));
+  const slot = new Date(Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate(), SLOT_HOUR_LOCAL, 0, 0, 0));
+  return new Date(slot.getTime() - ASIA_SHANGHAI_OFFSET_MS);
+}
+
+function parseNullableIso(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? new Date(ms) : null;
+}
+
+export function evaluateRunInterval({
+  now = new Date(),
+  lastSuccessfulRunAt = null,
+  intervalDays = 7,
+  forceRun = false,
+} = {}) {
+  const normalizedIntervalDays = (() => {
+    const n = Number(intervalDays);
+    return Number.isFinite(n) && n > 0 ? n : 7;
+  })();
+  const currentRunAt = new Date(now).toISOString();
+  const currentSlot = resolvePlannedSlotAt(now);
+  const currentSlotIso = currentSlot.toISOString();
+  const lastAcceptedSlot = parseNullableIso(lastSuccessfulRunAt)
+    ? resolvePlannedSlotAt(lastSuccessfulRunAt)
+    : null;
+  const lastAcceptedSlotIso = lastAcceptedSlot ? lastAcceptedSlot.toISOString() : null;
+
+  const slotIntervalMs = Math.max(1, Math.round(normalizedIntervalDays * 24 * 60 * 60 * 1000));
+  const elapsedHoursSinceLastSuccess = lastAcceptedSlot
+    ? (currentSlot.getTime() - lastAcceptedSlot.getTime()) / 3600000
+    : null;
+  const runDue = lastAcceptedSlot === null || (elapsedHoursSinceLastSuccess !== null && currentSlot.getTime() - lastAcceptedSlot.getTime() >= slotIntervalMs);
+  const nextEligibleRunAt = lastAcceptedSlot
+    ? new Date(lastAcceptedSlot.getTime() + slotIntervalMs).toISOString()
+    : currentSlotIso;
+  const skippedDueToInterval = !runDue && !forceRun;
+
+  return {
+    run_interval_days: normalizedIntervalDays,
+    last_successful_run_at: lastSuccessfulRunAt,
+    last_accepted_planned_slot_at: lastAcceptedSlotIso,
+    current_run_at: currentRunAt,
+    current_planned_slot_at: currentSlotIso,
+    elapsed_hours_since_last_success: elapsedHoursSinceLastSuccess,
+    run_due: runDue,
+    force_run: Boolean(forceRun),
+    skipped_due_to_interval: skippedDueToInterval,
+    next_eligible_run_at: nextEligibleRunAt,
+  };
+}

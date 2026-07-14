@@ -1,0 +1,5 @@
+interface:
+  display_name: "PaperEcho - Zotero Desktop"
+  short_description: "Track literature through Zotero Desktop"
+  brand_color: "#2563EB"
+  default_prompt: "Use $paperecho-zotero-desktop to run or improve the Zotero Desktop literature tracking workflow."

@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "query": "",
+  "days_back": 10,
+  "per_page": 50,
+  "mailto": "",
+  "filters": { "type": "article" },
+  "sort": "relevance_score:desc",
+  "select": "id,doi,title"
+}

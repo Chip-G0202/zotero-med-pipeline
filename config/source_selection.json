@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "description": "研究领域驱动的检索源选择配置。根据 research_domain 决定运行时启用哪些检索源，而不是默认所有源一起跑。",
+  "research_domain": "unknown",
+  "domain_options": {
+    "biomedical": {
+      "label": "生物医学 / 临床医学 / 药学 / 公共卫生 / 生物学",
+      "primary_sources": [
+        "pubmed_pmc"
+      ],
+      "supplemental_sources": [
+        "rss"
+      ],
+      "notes": "默认 PubMed/PMC 为主检索源，RSS 为补充，OpenAlex 默认不启用"
+    },
+    "non_biomedical_stem": {
+      "label": "传统理工 / 计算机 / 工程 / 材料 / 化学 / 物理 / 数学",
+      "primary_sources": [
+        "openalex"
+      ],
+      "supplemental_sources": [
+        "rss"
+      ],
+      "notes": "默认 OpenAlex 为主检索源，RSS 为补充，PubMed/PMC 默认不启用"
+    },
+    "education_social_science": {
+      "label": "教育 / 社科 / 管理 / 人文 / 经济 / 心理",
+      "primary_sources": [
+        "openalex"
+      ],
+      "supplemental_sources": [
+        "rss"
+      ],
+      "notes": "默认 OpenAlex 为主检索源，RSS 为补充，PubMed/PMC 默认不启用"
+    },
+    "mixed_biomedical_technical": {
+      "label": "混合领域 (medical AI / bioinformatics / health education / health informatics)",
+      "primary_sources": [
+        "pubmed_pmc",
+        "openalex"
+      ],
+      "supplemental_sources": [
+        "rss"
+      ],
+      "notes": "必须由配置显式声明 mixed，允许 PubMed/PMC + OpenAlex 混合检索"
+    },
+    "unknown": {
+      "label": "未知 / 信息不足 / 需人工确认",
+      "primary_sources": [],
+      "supplemental_sources": [
+        "rss"
+      ],
+      "notes": "不猜测调用源，require_manual_confirmation=true 时仅 RSS 补充可用"
+    }
+  },
+  "override_enabled_sources": null,
+  "require_manual_confirmation": true,
+  "notes": "Select and review sources for your own research domain."
+}

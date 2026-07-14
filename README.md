@@ -1,228 +1,189 @@
-# Zotero Med Pipeline
+# PaperEcho
 
-一个基于 Codex 的科研文献自动化工作流，用于文献发现、筛选分级、Zotero 写回、标题翻译、偏好学习和报表生成。
+一个面向多学科研究的文献工作流：持续发现、筛选和整理新文献，并按需交付到 Zotero 或本地报告。
 
-MIT License | Codex workflow | v1.6 update
-
-[快速开始](#快速开始) | [v1.6 更新](#v16-更新) | [目录结构](#目录结构) | [English](#english-version)
+[快速开始](#快速开始) | [V2.0 更新](#更新内容) | [目录结构](#目录结构) | [English](#english-version)
 
 ## 这是什么
 
-Zotero Med Pipeline 是一个围绕 Codex、Zotero、Zotero MCP、RSS、PubMed/PMC、可配置筛选规则和报表导出构建的科研文献自动化工作流。
+> **听见文献回声，找到值得追随的研究线索。**
 
-它适合需要长期跟踪新文献、整理检索结果、维护 Zotero 文献库、收集反馈并定期生成文献评价报告的科研者和研究团队。
+新的文献不断出现，重要的不只是收集得更多，还要从持续更新的信息中，及时发现与自己研究相关的变化。
 
-> 它不会替代研究判断，而是负责重复性的第一轮筛选、归类和记录，把最终判断留给研究者。
+PaperEcho 是一套面向长期科研工作的文献追踪与整理工具。它持续获取新文献，完成去重、筛选、分级和整理，再将结果写入 Zotero 或生成本地报告，让值得关注的研究不被信息流淹没。
 
-## v1.6 更新
+你可以选择 Zotero Desktop、Zotero Web API，或者完全脱离 Zotero 的 Standalone Local 路径；也可以根据研究方向配置 OpenAlex、PubMed/PMC、RSS 或本地数据。
 
-这次更新重点是让自动化更稳、更少误判、标签更干净。
+PaperEcho 不替代研究者作出判断。它负责整理不断传来的文献回声，把更多时间留给阅读、思考，以及下一步研究。
 
-- 收录更灵活：新增期刊白名单，指定新期刊可直接放行，不被期刊质量规则误拦。
-- Zotero 写回更稳：大幅降低了批量写回、翻译回填时的 MCP 解析错误，自动化任务更少中断。
-- 自动流程更可靠：前置检查更真实，失败阶段不会悄悄继续往下跑，避免“看起来跑完，其实没跑完”。
-- 标签更干净：批量入库和历史条目维护时，会自动清理 `doi:`、`pmid:`、`pmcid:`、`url:`、`title:` 这类签名标签，减少噪声。
-- 反馈更安全：你之前标记过的文献分级迁移，不会被后续新文献入库流程覆盖。
+## 更新内容
 
+**PaperEcho V2.0** 面向不同的研究环境，扩展了运行方式，也补齐了长期自动运行所需的能力。
+
+- **从单一 Zotero Desktop 扩展为三条路径。** 原有的 Desktop 工作方式继续保留；新增的 Zotero Web API 路径无需保持桌面客户端运行；Standalone Local 则完全脱离 Zotero，通过本地 JSON/JSONL 和报告文件完成处理与交付。
+- **Desktop 从 MCP 迁移至 CLI。** Desktop 减少了中间通信，Web 直接使用 Zotero Web API，Local 在本地独立运行。三条路径共用核心工作流，不再依赖 MCP。
+- **新增邮件通知。** 工作流完成后可按需发送运行结果和报告附件，周期任务结束后不必再手动查看。
+- **加入定期清理，并优化整体性能。** PaperEcho 会清理到期的临时运行产物，同时通过批量读写、减少重复调用和缩短执行链路提升效率。
 
 ## 核心特色
 
 | 特色 | 说明 |
 | --- | --- |
-| 四阶段自动化 | 检索、去重、分级、Zotero 写回、翻译和报表导出串成完整流程。 |
-| 可配置分级 | 通过配置文件定义 A/B/C/D 筛选标准，让流程适配不同研究方向。 |
-| 反馈学习 | 将用户反馈和筛选标准沉淀为可审计的偏好更新。 |
-| Zotero MCP 集成 | 自动创建条目并归入日期、来源和分级收藏夹，同时清理 `doi:`/`pmid:`/`pmcid:`/`url:`/`title:` 等签名标签。 |
-| 语义复审 | 结合 semantic search，为边界文献提供辅助复核信号。 |
-| 4–5 星自动迁移 | `文献池` 中被标记为 4 星或 5 星的条目会自动迁移到顶层集合 `值得精读`。 |
-| 日报与周期报告 | 输出便于人工复核、反馈和长期追踪的文献评价文件。 |
+| Zotero Desktop | 继续使用本机 Zotero 文献库，通过 CLI 完成文献写入和整理。 |
+| Zotero Web API | 连接 Zotero 云端文献库，无需保持桌面客户端运行。 |
+| Standalone Local | 完全脱离 Zotero，通过本地文件完成文献处理和报告交付。 |
+| 多学科文献发现 | 根据研究领域组合 OpenAlex、PubMed/PMC、RSS 或本地文献数据。 |
+| 自动去重与分级 | 识别重复文献，完成 A/B/C/D 分级，把需要判断的内容留给研究者。 |
+| Zotero 写回 | Desktop 和 Web 路径支持集合整理、批量写入和标题翻译回填。 |
+| 本地独立交付 | Local 路径使用 JSON/JSONL 输入，在本地完成处理并生成报告。 |
+| 反馈持续学习 | 将文章反馈和长期筛选标准用于后续筛选，减少重复调整。 |
+| 报告与邮件 | 生成周报和到期月报，并可在完成后发送邮件通知与附件。 |
+| 自动维护 | 定期清理到期运行产物，同时保护长期配置、反馈和正式报告。 |
 
-## 九个 Skill
+## Skills
 
 | Skill | 作用 | 一句话说明 |
 | --- | --- | --- |
-| med-stage-orchestrator | 四阶段编排 | 保证 Stage1→2→3→4 顺序执行，上游失败则下游不跑 |
-| med-entry-parallel | 并行入库 | RSS + PubMed/PMC 同时拉取，合并去重 |
-| med-query-learning | 反馈学习 | 从 Excel 反馈和 docx 评价中学习，调整检索策略 |
-| med-daily-triage | 每日分级 | 把文献分为 A/B/C/D 四级，生成隔日报 |
-| med-zotero-bridge | Zotero 桥接 | 通过 MCP 把分级结果写回 Zotero，归入日期收藏夹 |
-| med-monthly-synthesis | 月度综合 | 当月最后一次到期执行时汇总趋势，生成月报 |
-| med-export-policy | 导出策略 | 统一管理报表导出方法、兜底路径和导出审计 |
-| med-screening-standards | 筛选标准管理 | 维护 screening_standards.md 的更新、建议和同步 |
-| med-semantic-grading | 语义复审 | 用 semantic search 对边界文献做辅助复核 |
+| `paperecho-workflow` | 共享能力 | 为三条路径提供文献发现、筛选、报告、通知和定期维护。 |
+| `paperecho-zotero-desktop` | Zotero Desktop | 适合继续使用本机 Zotero 文献库的用户，通过 CLI 执行读写。 |
+| `paperecho-zotero-web` | Zotero Web API | 适合使用 Zotero 云端文献库、无需保持桌面客户端运行的用户。 |
+| `paperecho-local` | Standalone Local | 适合不使用 Zotero、希望通过本地文件完成全部处理和交付的用户。 |
+
+在 Codex 中选择与你的使用方式对应的 Skill，即可进入相应路径。
 
 ## 目录结构
 
 ```text
 ├── README.md
 ├── LICENSE
+├── AGENTS.md
 ├── .env.example
-├── Automation/
-│   ├── AGENTS.md
-│   ├── PUBLIC_RELEASE_CHECKLIST.md
-│   ├── .gitignore
-│   ├── package.json
-│   ├── package-lock.json
-│   ├── config/
-│   │   ├── rss_sources.json
-│   │   ├── pubmed_pmc_search.json
-│   │   ├── workflow_rules.json
-│   │   ├── title_translation.config.json
-│   │   ├── preference_learning.config.json
-│   │   └── README.md
-│   ├── prompts/
-│   │   ├── title_translation.md
-│   │   └── preference_learning.md
-│   ├── docs/
-│   │   ├── contracts/
-│   │   ├── med-skill-alignment.md
-│   │   ├── internal-script-inventory.md
-│   │   └── internal-module-ownership.md
-│   ├── tests/
-│   └── tools/
-│       ├── README.md
-│       ├── run_zotero_literature_filter.mjs
-│       ├── run_research_os_pipeline.mjs
-│       ├── mcp_bulk_writeback.mjs
-│       ├── mcp_translation_backfill.mjs
-│       ├── finalize_research_os_exports.mjs
-│       ├── check_zotero_mcp_ready.mjs
-│       ├── check_ollama_ready.mjs
-│       ├── check_med_query_learning_feedback.mjs
-│       ├── check_previous_feedback_learning.mjs
-│       ├── dry_run_writeback_pool_dedupe.mjs
-│       ├── archive_history_by_feedback.mjs
-│       ├── zotero_feedback_collection_corrections.mjs
-│       └── lib/
-│           ├── zotero_collection_guard.mjs
-│           ├── writeback_support.mjs
-│           ├── workflow_classifier.mjs
-│           ├── triage_policy.mjs
-│           ├── ensure_zotero_mcp_ready.mjs
-│           ├── ensure_ollama_ready.mjs
-│           ├── orchestrator_status.mjs
-│           ├── schedule_support.mjs
-│           ├── runtime_config.mjs
-│           ├── pipeline_stage_support.mjs
-│           ├── feedback_learning_support.mjs
-│           ├── preference_learning_support.mjs
-│           ├── screening_standards_file.mjs
-│           ├── easyscholar_journal_quality_gate.mjs
-│           ├── monthly_docx_report.mjs
-│           ├── report_period_support.mjs
-│           ├── title_translation_support.mjs
-│           ├── translation_backfill_support.mjs
-│           ├── spreadsheet_adapter.mjs
-│           ├── review_workbook_reader.mjs
-│           ├── zotero_semantic_search.mjs
-│           └── ...
-└── Skills/
-    ├── VERSION.md
-    ├── med-daily-triage/
-    ├── med-entry-parallel/
-    ├── med-export-policy/
-    ├── med-query-learning/
-    ├── med-screening-standards/
-    ├── med-semantic-grading/
-    ├── med-stage-orchestrator/
-    ├── med-monthly-synthesis/
-    └── med-zotero-bridge/
+├── package.json
+├── package-lock.json
+├── config/
+│   ├── paperecho.config.example.json
+│   ├── rss_sources.json
+│   ├── pubmed_pmc_search.json
+│   ├── source_selection.json
+│   ├── review-workflow-rules.json
+│   ├── title_translation.config.json
+│   ├── preference_learning.config.json
+│   └── README.md
+├── docs/
+│   ├── configuration.md
+│   ├── paperecho-setup-template.md
+│   ├── contract-workflow.md
+│   ├── contract-writeback.md
+│   ├── contract-export.md
+│   └── ...
+├── skills/
+│   ├── paperecho-workflow/
+│   ├── paperecho-zotero-desktop/
+│   │   └── scripts/run.mjs
+│   ├── paperecho-zotero-web/
+│   │   └── scripts/run.mjs
+│   └── paperecho-local/
+│       └── scripts/run.mjs
+├── tests/
+│   ├── full_workflow_benchmark/
+│   └── helpers/
+└── workflow/
+    ├── tests/
+    └── tools/
+        ├── runner/
+        │   ├── main.mjs
+        │   ├── config_loader.mjs
+        │   ├── preflight.mjs
+        │   └── result_validation.mjs
+        ├── stage0/main.mjs
+        ├── local/main.mjs
+        ├── stage1/
+        ├── stage2/
+        ├── stage3/
+        ├── stage4/
+        ├── stage5/
+        ├── maintenance/
+        └── lib/
 ```
 
 ## 快速开始
 
 ### 1. 准备环境
 
-- Node.js 18+
-- PowerShell 7+
-- Zotero Desktop
-- Zotero MCP Plugin
-- 可选：Ollama（用于语义复审）
+安装 Node.js >= 18、npm 和 PowerShell 7 (`pwsh`)。如果选择 Desktop 路径，还需要 Zotero Desktop；如果选择 Web 路径，需要 Zotero API key；Local 路径无需 Zotero。
 
-### 2. 复制环境变量模板
+### 2. 下载并安装依赖
 
 ```bash
-copy .env.example .env
+git clone https://github.com/Chip-G0202/PaperEcho.git
+cd PaperEcho
+npm install
 ```
 
-### 3. 配置本地参数
-
-按项目说明填写 `.env` 中的：
-
-- `TITLE_TRANSLATION_API_KEY`
-- `PREFERENCE_LEARNING_API_KEY`
-- `EASYSCHOLAR_SECRET_KEY`（可选；示例值为 `your_easyscholar_secret_key_here`）
-- `EASYSCHOLAR_RATE_LIMIT_PER_SECOND`（可选；默认 `2`）
-- `ZOTERO_MCP_URL`
-- `ZOTERO_EXE`
-
-EasyScholar key 只用于数据库检索来源文章的期刊质量筛选；不配置时不会筛除候选，只会在审计中记录该 gate 未启用。
-
-### 4. 配置搜索源与筛选规则
-
-按研究方向修改：
-
-- `config/rss_sources.json`
-- `config/pubmed_pmc_search.json`
-- `screening_standards.md`
-- `config/workflow_rules.json`
-
-### 5. 运行主入口
+### 3. 创建本地配置
 
 ```powershell
-node tools/run_zotero_literature_filter.mjs
+Copy-Item config/paperecho.config.example.json config/paperecho.config.json
+Copy-Item .env.example .env
 ```
 
-如果只想先跑 Stage1，不动 Zotero：
+在 `config/paperecho.config.json` 中选择 Desktop、Web 或 Local，并按研究领域配置 OpenAlex、PubMed/PMC、RSS 或本地输入。API key、SMTP 密码等 secret 只写入本机 `.env`。完整字段见 [`docs/configuration.md`](docs/configuration.md)。
+
+### 4. 检查并运行
+
+在 Codex 中使用对应的路径 Skill：
+
+```text
+使用 $paperecho-zotero-desktop，读取 config/paperecho.config.json，先检查配置，再运行完整流程。
+使用 $paperecho-zotero-web，读取 config/paperecho.config.json，先检查配置，再运行完整流程。
+使用 $paperecho-local，读取 config/paperecho.config.json，先检查配置，再运行本地流程。
+```
+
+也可以直接检查选定路径：
 
 ```powershell
-node tools/run_zotero_literature_filter.mjs --stage1-only
+node skills/paperecho-zotero-desktop/scripts/run.mjs --check --config config/paperecho.config.json
+node skills/paperecho-zotero-web/scripts/run.mjs --check --config config/paperecho.config.json
+node skills/paperecho-local/scripts/run.mjs --check --config config/paperecho.config.json
 ```
 
-### 6. 配置 Codex 自动化任务
-
-你可以把整条管线配置成 Codex 自动化任务，系统会按计划自动运行，不需要每天手动触发。
-
-默认行为：
-
-- 每 2 天执行一次完整管线
-- 不到 2 天自动跳过，并输出 skip 报告
-- 月报在当月最后一次到期执行时生成
-
-> 详细安装、配置、运行说明和自动化边界，请见 [`Automation/AGENTS.md`](Automation/AGENTS.md)。
+检查通过后，将所选命令中的 `--check` 改为 `--run`。
 
 ## 支持项目
 
-如果该项目帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。
-<img width="600" alt="c852b20ca26b99f8739606b28f92fed8" src="https://github.com/user-attachments/assets/a30216d0-9bde-4be5-8c9f-216b08ec3b98" />
+如果 PaperEcho 帮你减少了重复筛选、整理和汇报的时间，可以请我喝杯咖啡，或随手赞赏支持后续维护。
+
+<img width="600" alt="Support PaperEcho" src="https://github.com/user-attachments/assets/a30216d0-9bde-4be5-8c9f-216b08ec3b98" />
 
 ## 付费安装配置与研究方向配置包
 
-本项目本身开源，你可以自由下载、修改和自部署。付费服务主要面向希望节省配置时间、快速落地工作流、或希望为特定研究方向准备筛选配置的人。
+PaperEcho 本身采用 MIT License，你可以自由下载、修改和自部署。付费服务面向希望节省配置时间、快速落地三路径工作流，或希望为特定研究方向准备筛选配置的用户。
 
-需要可以联系 Email：g2269204031@163.com 小红书账号：278803432
+联系信息：`<YOUR_CONTACT_EMAIL>` / `<YOUR_XIAOHONGSHU_ID>`
 
 ### 定制安装配置服务
 
-适合希望把工作流在本地跑起来，但不想自己处理环境和配置细节的用户。
+适合希望尽快把流程跑起来，但不想自行处理运行环境和配置细节的用户。
 
-- 依赖安装与运行环境检查
-- `.env`、Zotero MCP、翻译模型和偏好学习配置
-- Codex 自动化设置与首次运行排查
+- Node.js、PowerShell、Zotero 与路径依赖检查
+- Desktop、Web 或 Local 路径选择与统一配置
+- `.env`、标题翻译、偏好学习和 SMTP 配置
+- Codex 定时任务、运行前检查与首次运行排查
 
 ### 研究方向配置包
 
-适合已经有明确研究方向，希望直接获得一套可复用配置模板的用户。
+适合已有明确研究方向，希望获得一套可维护、可审计配置模板的用户。
 
-- RSS 与 PubMed/PMC 检索式设计
-- A/B/C/D 筛选标准与分级规则配置
-- 翻译、偏好学习和自动化运行清单配置
+- OpenAlex、PubMed/PMC、RSS 与本地数据源策略
+- A/B/C/D 分级规则与边界设计
+- `screening_standards.md` 初始结构
+- 标题翻译、偏好学习、周报/月报和自动化运行清单
 
-## 医学免责声明
+## 免责声明
 
-本项目仅用于文献检索、证据整理与学术写作辅助，不构成医学建议、诊断、治疗方案或临床决策支持。
+本项目用于文献检索、信息整理、研究筛选与学术写作辅助，不替代专业研究判断、同行评议或对原始文献的核查。
 
-所有文献数据来自公开数据库，AI 分级结果仅供参考，最终判断请以专业知识和同行评议为准。
+自动分级、翻译和 AI 生成内容仅供参考。涉及医学、法律、工程安全或其他高风险领域时，不应将 PaperEcho 的输出直接作为诊断、决策或操作依据。
 
 ## License
 
@@ -232,62 +193,63 @@ MIT License. See [LICENSE](LICENSE).
 
 # English Version
 
-# Zotero Med Pipeline
+# PaperEcho
 
-A Codex-driven research literature automation workflow for discovery, triage, Zotero writeback, translation, feedback learning, and report generation.
+A multidisciplinary literature workflow for continuously discovering, screening, and organizing research, with delivery to Zotero or local reports.
 
-MIT License | Codex workflow | v1.6 update
-
-[Quick Start](#quick-start-1) | [v1.6 Updates](#v16-updates) | [License](#license-2)
+[Quick Start](#quick-start) | [Update](#update) | [Support](#support-the-project) | [License](#license-1)
 
 ## What is this?
 
-Zotero Med Pipeline is a research literature automation workflow built around Codex, Zotero, Zotero MCP, RSS feeds, PubMed/PMC retrieval, configurable screening rules, and report export.
+> **Hear the echoes of research. Find the signals worth following.**
 
-It is designed for researchers and teams who need to monitor new papers, filter noisy results, organize Zotero collections, collect feedback, and generate regular review reports.
+New papers arrive constantly. The challenge is not simply collecting more of them, but noticing which changes matter to your research.
 
-> It does not replace research judgment. It automates the repetitive first pass and keeps the final decision with the researcher.
+PaperEcho is a literature tracking and organization tool for long-term research. It continuously collects new literature, removes duplicates, screens and grades results, then writes them to Zotero or produces local reports so relevant work is less likely to disappear into the stream.
 
-## v1.6 Updates
+Choose Zotero Desktop, Zotero Web API, or the fully independent Standalone Local path. Sources can include OpenAlex, PubMed/PMC, RSS, or local data, depending on the research field.
 
-This update focuses on stability, cleaner automation, and cleaner metadata in Zotero.
+PaperEcho does not make research judgments for you. It handles the recurring organization work, leaving more time for reading, thinking, and deciding what to study next.
 
-- More flexible screening: a new journal allowlist lets selected journals bypass the journal-quality gate.
-- More stable Zotero writeback: fewer MCP parse errors during batch writeback and translation backfill.
-- More reliable automation: pre-stage checks are stricter, and failed stages no longer silently continue.
-- Cleaner tags: signature-style tags such as `doi:`, `pmid:`, `pmcid:`, `url:`, and `title:` are cleaned during writeback and metadata maintenance.
-- Safer feedback handling: prior feedback-driven collection migrations are not overwritten by later ingestion runs.
+## Update
+
+**PaperEcho V2.0** adds new ways to run the workflow and the maintenance features needed for long-term automation.
+
+- **From one Zotero Desktop path to three paths:** the original Desktop workflow remains available, joined by a Zotero Web API path that does not require the desktop client to stay open and a Standalone Local path that works entirely through local JSON/JSONL files and reports without Zotero.
+- **A more direct execution model:** Desktop moves from MCP to CLI, Web connects directly through the Zotero Web API, and Local runs independently on the filesystem. All three share the same core workflow without depending on MCP.
+- **Email notification:** completed runs can send result notifications and report attachments when requested.
+- **Scheduled cleanup and performance improvements:** expired temporary run artifacts are cleaned automatically, while batch operations, fewer repeated calls, and shorter execution paths improve overall efficiency.
 
 ## Quick Start
 
-1. Prepare Node.js 18+, PowerShell 7+, Zotero Desktop, Zotero MCP Plugin, and optional Ollama.
-2. Copy `.env.example` to `.env` and fill in local values, including optional `EASYSCHOLAR_SECRET_KEY=your_easyscholar_secret_key_here` if you want journal-quality filtering for database-sourced papers.
-3. Edit RSS, PubMed/PMC, grading, translation, and preference-learning configs under `config/`.
-4. Edit `screening_standards.md`.
-5. Run the main entrypoint:
-
-```powershell
-node tools/run_zotero_literature_filter.mjs
-```
+1. Install Node.js 18+, npm, and PowerShell 7+. Desktop also requires Zotero Desktop; Web requires a Zotero API key; Local requires no Zotero installation.
+2. Clone the repository and run `npm install`.
+3. Copy `config/paperecho.config.example.json` to `config/paperecho.config.json` and `.env.example` to `.env`. Choose one path and configure OpenAlex, PubMed/PMC, RSS, or local input for your field.
+4. Use `$paperecho-zotero-desktop`, `$paperecho-zotero-web`, or `$paperecho-local` in Codex. Run the selected launcher with `--check`, then change it to `--run` after the check passes.
 
 ## Support the Project
 
-If this project helps you, you can buy me a coffee or send a small appreciation to support continued maintenance.
-<img width="600" alt="c852b20ca26b99f8739606b28f92fed8" src="https://github.com/user-attachments/assets/a30216d0-9bde-4be5-8c9f-216b08ec3b98" />
+If PaperEcho saves you time, you can buy me a coffee or send a small appreciation to support continued maintenance.
+
+<img width="600" alt="Support PaperEcho" src="https://github.com/user-attachments/assets/a30216d0-9bde-4be5-8c9f-216b08ec3b98" />
 
 ## Paid Setup & Research Direction Packs
 
-The project is open source. Paid support is available for users who want faster setup or direction-specific configuration packs.
+PaperEcho is available under the MIT License. Paid support is intended for users who want faster setup or a maintainable direction-specific configuration pack.
 
-For paid support, contact Email: g2269204031@163.com Xiaohongshu: 278803432
+Contact: `<YOUR_CONTACT_EMAIL>` / `<YOUR_XIAOHONGSHU_ID>`
 
 ### Custom installation & setup
 
-Dependency checks, local environment configuration, Zotero MCP checks, Codex automation setup, and first-run troubleshooting.
+Runtime checks, Desktop/Web/Local configuration, secret setup, scheduled Codex tasks, pre-run checks, and first-run troubleshooting.
 
 ### Research direction configuration pack
 
-RSS and PubMed/PMC strategy design, A/B/C/D screening rules, translation and preference-learning configuration.
+OpenAlex, PubMed/PMC, RSS, and local-source strategy design, A/B/C/D screening rules, screening standards, translation, feedback learning, and recurring report configuration.
+
+## Disclaimer
+
+PaperEcho supports literature discovery, information organization, research screening, and academic writing. It does not replace professional judgment, peer review, or verification against original sources. Its output must not be used directly for medical, legal, engineering-safety, or other high-risk decisions.
 
 ## License
 

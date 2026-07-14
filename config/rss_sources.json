@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "description": "Public template with a disabled fictional source.",
+  "sources": [
+    {
+      "name": "Example Journal",
+      "url": "https://example.com/feed.xml",
+      "enabled": false
+    }
+  ]
+}

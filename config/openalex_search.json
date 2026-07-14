@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "description": "Public template for OpenAlex retrieval.",
+  "enabled": false,
+  "query": "__YOUR_SEARCH_QUERY__",
+  "days_back": 10,
+  "per_page": 50,
+  "mailto": "",
+  "filters": {
+    "type": "article",
+    "is_oa": null,
+    "from_publication_date": null,
+    "to_publication_date": null,
+    "concepts": [],
+    "default_search": "__YOUR_SEARCH_QUERY__"
+  },
+  "sort": "relevance_score:desc",
+  "select": "id,doi,title,publication_year,publication_date,authorships,primary_location,abstract_inverted_index,open_access,type",
+  "notes": "disabled 时安全返回空结果。query 为空时也返回空。mailto 可选填写邮箱以获得更高速率限制，不要填写真实邮箱。"
+}

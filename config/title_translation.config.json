@@ -1,0 +1,20 @@
+{
+  "endpoint": "https://api.xiaomimimo.com/v1/chat/completions",
+  "model": "mimo-v2.5",
+  "temperature": 0,
+  "top_p": 0.95,
+  "stream": true,
+  "thinking": false,
+  "timeout_ms": 30000,
+  "max_retries": 2,
+  "batch_size": 64,
+  "concurrency_limit": 64,
+  "provider_concurrency_limit": 2500,
+  "user_id": "zotero-mcp-literature-workflow",
+  "fallback_to_english": true,
+  "rate_limit": {
+    "rpm": 100,
+    "tpm": 10000000
+  },
+  "prompt_file": "config/prompt-title-translation.md"
+}

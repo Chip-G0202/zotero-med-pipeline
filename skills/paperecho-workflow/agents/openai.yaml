@@ -1,0 +1,4 @@
+interface:
+  display_name: "PaperEcho Workflow"
+  short_description: "PaperEcho three-path Stage1-5 engineering guide"
+  default_prompt: "Use $paperecho-workflow to inspect or change PaperEcho while preserving shared architecture and path boundaries."
