@@ -159,7 +159,7 @@ node skills/paperecho-local/scripts/run.mjs --check --config config/paperecho.co
 
 PaperEcho 本身采用 MIT License，你可以自由下载、修改和自部署。付费服务面向希望节省配置时间、快速落地三路径工作流，或希望为特定研究方向准备筛选配置的用户。
 
-联系信息：`<YOUR_CONTACT_EMAIL>` / `<YOUR_XIAOHONGSHU_ID>`
+联系信息：g2269204031@163.com
 
 ### 定制安装配置服务
 
@@ -237,7 +237,7 @@ If PaperEcho saves you time, you can buy me a coffee or send a small appreciatio
 
 PaperEcho is available under the MIT License. Paid support is intended for users who want faster setup or a maintainable direction-specific configuration pack.
 
-Contact: `<YOUR_CONTACT_EMAIL>` / `<YOUR_XIAOHONGSHU_ID>`
+Contact: g2269204031@163.com
 
 ### Custom installation & setup
 
