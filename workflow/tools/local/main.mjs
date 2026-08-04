@@ -11,6 +11,11 @@ import { buildExportManifest, buildRunSummary } from "../lib/run_summary.mjs";
 import { buildLocalRuntimeConfig } from "../lib/runtime_config.mjs";
 import { generateLiteratureTitleTranslations } from "../lib/title_translation_generation.mjs";
 import { resolveStage5Request, runStage5Notification } from "../stage5/main.mjs";
+import { recipientHash } from "../stage5/email_receipt.mjs";
+import { canonicalQueryHash } from "../stage1/source_state.mjs";
+import { createRunRecoveryCoordinator, resumeRunFromLedger } from "../recovery/run_recovery.mjs";
+import { buildLocalRecoveryReconcilers } from "../recovery/local_reconciliation.mjs";
+import { hashFile } from "../recovery/operation_ledger.mjs";
 import {
   finishRunGroup,
   recordImmediateCleanup,
@@ -32,6 +37,11 @@ export function parseLocalArgs(argv = process.argv.slice(2)) {
     fixtureRoot: runtime.fixtureRoot,
     llmMode: runtime.llmMode,
     ...resolveStage5Request(argv),
+    resume: (() => {
+      const equals = argv.find((value) => String(value).startsWith("--resume="));
+      const index = argv.indexOf("--resume");
+      return equals ? String(equals).slice("--resume=".length) : index >= 0 ? String(argv[index + 1] || "") : "";
+    })(),
   };
 }
 
@@ -53,7 +63,8 @@ function feedbackRows(events, repository) {
 }
 
 export async function runLocalPipeline(options = {}, dependencies = {}) {
-  const runId = `local-${new Date().toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`;
+  const runId = options.runId || `local-${new Date().toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`;
+  const recoveryCoordinator = options.recoveryCoordinator || null;
   const startedAt = new Date().toISOString();
   const timing = dependencies.timing || new LocalTiming(runId);
   const timingPath = path.join(path.resolve(options.outputRoot || "."), "runs", runId, "timings.json");
@@ -128,7 +139,11 @@ export async function runLocalPipeline(options = {}, dependencies = {}) {
     await timing.run("feedback_load", async () => {
       if (options.feedback) {
         const incoming = await readFeedbackJsonl(options.feedback, { tolerateIncompleteTail: false });
+        const feedbackOperation = recoveryCoordinator && incoming.length
+          ? await recoveryCoordinator.prepareFileOperation({ type: "metadata_state", targetId: repository.feedbackPath, targetPath: repository.feedbackPath, input: { eventIds: incoming.map((event) => event.event_id || "").filter(Boolean) }, retryable: false })
+          : null;
         for (const event of incoming) await repository.appendFeedback(event, { source: options.feedback });
+        if (feedbackOperation) await recoveryCoordinator.completeFileOperation(feedbackOperation, repository.feedbackPath, { eventCount: incoming.length });
       }
       const persistedFeedback = await readFeedbackJsonl(repository.feedbackPath);
       consumedEventIds = new Set(Array.isArray(learningState.consumed_feedback_event_ids) ? learningState.consumed_feedback_event_ids.map(String) : []);
@@ -177,13 +192,28 @@ export async function runLocalPipeline(options = {}, dependencies = {}) {
       const translatedTitle = translatedByTitle.get(String(item.title || ""));
       return translatedTitle ? { ...item, translatedTitle } : item;
     });
+    if (recoveryCoordinator) {
+      await recoveryCoordinator.persistArtifact(stage1Result.triagedAll || [], stage1Result.triagedAll || []);
+      await recoveryCoordinator.store.setStage("stage1", "verified", { identityCount: recoveryCoordinator.store.ledger.identities.length });
+    }
     const createdLiteratureItems = stage1Result.triagedAll.filter((item) => !repository.findExisting(item).exists);
     const literatureItems = createdLiteratureItems
       .map((item) => ({ title: item.title || "", grade: item.final_grade || item.grade || "" }));
     let persistence;
+    const localStateOperation = recoveryCoordinator
+      ? await recoveryCoordinator.prepareFileOperation({ type: "local_state", targetId: repository.papersPath, targetPath: repository.papersPath, input: { runId, identities: recoveryCoordinator.store.ledger.identities } })
+      : null;
+    const sharedIndexOperation = recoveryCoordinator
+      ? await recoveryCoordinator.prepareFileOperation({ type: "shared_index", targetId: repository.sharedIndexPath, targetPath: repository.sharedIndexPath, input: { runId, identities: recoveryCoordinator.store.ledger.identities } })
+      : null;
     await timing.run("state_persist", async () => {
       persistence = repository.upsertPapers(stage1Result.triagedAll, { runId });
       await repository.save();
+      if (localStateOperation) await recoveryCoordinator.completeFileOperation(localStateOperation, repository.papersPath, { identityCount: recoveryCoordinator.store.ledger.identities.length });
+      if (sharedIndexOperation) await recoveryCoordinator.completeFileOperation(sharedIndexOperation, repository.sharedIndexPath, { identityCount: recoveryCoordinator.store.ledger.identities.length });
+      const learningOperation = recoveryCoordinator
+        ? await recoveryCoordinator.prepareFileOperation({ type: "metadata_state", targetId: repository.learningPath, targetPath: repository.learningPath, input: { runId, feedbackEvents: normalizedFeedbackRows.length }, retryable: false })
+        : null;
       await repository.saveLearningState({
         ...learningState,
         run_id: runId,
@@ -191,6 +221,8 @@ export async function runLocalPipeline(options = {}, dependencies = {}) {
         feedback_events_used: normalizedFeedbackRows.length,
         consumed_feedback_event_ids: [...consumedEventIds, ...seenPendingEventIds],
       });
+      if (learningOperation) await recoveryCoordinator.completeFileOperation(learningOperation, repository.learningPath, { feedbackEvents: normalizedFeedbackRows.length });
+      if (recoveryCoordinator) await recoveryCoordinator.store.setStage("state_persist", "verified", { created: persistence.created, updated: persistence.updated });
     }, () => ({ created_count: persistence.created, updated_count: persistence.updated, feedback_consumed_count: normalizedFeedbackRows.length }));
 
     const runDir = path.join(repository.runsDir, runId);
@@ -204,12 +236,20 @@ export async function runLocalPipeline(options = {}, dependencies = {}) {
     const paths = { sourcePath, reviewRoot: repository.exportsDir, reviewMonthDir: repository.exportsDir, reviewDayDir: exportDayDir, requestedOutputPath: path.join(exportDayDir, "周报.xlsx"), exportInputFiles: [sourcePath] };
     const labels = { dateStr: new Date().toISOString().slice(0, 10), reviewMonthLabel: "Local", reviewDayLabel: runId };
     const exportRunner = dependencies.runStage4Export || (await import("../stage4/export_execution_step.mjs")).runStage4WorkbookExport;
+    const exportSourceHash = recoveryCoordinator ? await hashFile(sourcePath) : "";
+    const exportOperation = recoveryCoordinator
+      ? await recoveryCoordinator.prepareFileOperation({ type: "export", targetId: "local_stage4_weekly_export", targetPath: paths.requestedOutputPath, input: { artifactHash: recoveryCoordinator.store.ledger.artifact.hash, sourceHash: exportSourceHash }, intent: { sourcePath, sourceHash: exportSourceHash, requestedOutputPath: paths.requestedOutputPath } })
+      : null;
     const exported = await timing.run("stage4_export", async () => {
       const result = await exportRunner({ paths, labels, source });
       if (result.terminalExportError) throw result.terminalExportError;
       return result;
     });
     stage4Succeeded = true;
+    if (exportOperation) {
+      await recoveryCoordinator.completeFileOperation(exportOperation, exported.exportAudit.actual_output_path, { exportMethod: exported.exportAudit.export_method });
+      await recoveryCoordinator.store.setStage("stage4_exports", "verified", { outputPath: exported.exportAudit.actual_output_path });
+    }
     localSourceRegistration.markConsumed();
     const exportManifest = exported.exportManifest || await (dependencies.buildExportManifest || buildExportManifest)(exported.exportAudit, { outputRoot: exportDayDir });
     const timingReport = timing.report("success");
@@ -231,6 +271,9 @@ export async function runLocalPipeline(options = {}, dependencies = {}) {
     });
     const stage5Runner = dependencies.runStage5Notification || runStage5Notification;
     let stage5Notification;
+    const notificationOperation = recoveryCoordinator && options.recipient
+      ? await recoveryCoordinator.prepareFileOperation({ type: "notification", targetId: recipientHash(options.recipient), input: { runId, artifactHash: recoveryCoordinator.store.ledger.artifact.hash }, retryable: false })
+      : null;
     if (!options.recipient) {
       stage5Notification = await stage5Runner({ runSummary, literatureItems, recipient: "", forceResend: options.forceResend, config: { runStateRoot: runStateRoot(repository.runsDir, runId) } });
       timing.skip("stage5_notification", stage5Notification.reason);
@@ -238,12 +281,23 @@ export async function runLocalPipeline(options = {}, dependencies = {}) {
       stage5Notification = await timing.run("stage5_notification", () => stage5Runner({ runSummary, literatureItems, recipient: options.recipient, forceResend: options.forceResend, config: { runStateRoot: runStateRoot(repository.runsDir, runId) } }));
       if (stage5Notification.status === "failed") throw new Error(`STAGE5_NOTIFICATION_FAILED:${stage5Notification.reason}`);
     }
+    if (notificationOperation && (stage5Notification.status === "sent" || (stage5Notification.status === "skipped" && stage5Notification.reason === "already_sent"))) {
+      await recoveryCoordinator.completeNotification(notificationOperation, stage5Notification);
+      await recoveryCoordinator.store.setStage("stage5_notification", "verified", { status: stage5Notification.status });
+    } else if (notificationOperation) {
+      await recoveryCoordinator.store.transition(notificationOperation.idempotencyKey, "failed", { error: `STAGE5_${String(stage5Notification.status || "unknown").toUpperCase()}` });
+      await recoveryCoordinator.store.setStage("stage5_notification", "failed", { status: stage5Notification.status });
+    } else if (recoveryCoordinator) {
+      await recoveryCoordinator.store.setStage("stage5_notification", "verified", { status: "skipped", reason: stage5Notification.reason });
+    }
     const finalTimingReport = timing.report("success");
     businessSucceeded = true;
+    if (recoveryCoordinator) await recoveryCoordinator.store.setRunStatus(recoveryCoordinator.store.ledger.operations.every((operation) => operation.status === "verified") ? "completed" : "incomplete");
     await writeTiming(timingPath, finalTimingReport);
     return { ok: true, run_id: runId, output_root: options.outputRoot, imported: imported.items.length, import_errors: imported.errors, persistence, feedback_events_used: normalizedFeedbackRows.length, export_path: exported.exportAudit.actual_output_path, export_manifest: exportManifest, run_summary: runSummary, stage5_notification: stage5Notification, housekeeping, timing_path: timingPath, timings: finalTimingReport };
   } catch (error) {
     businessError = error;
+    if (recoveryCoordinator) await recoveryCoordinator.store.setRunStatus("failed").catch(() => {});
     if (businessSucceeded) throw businessError;
     const timingReport = timing.report("failed");
     try { await writeTiming(timingPath, timingReport); }
@@ -299,9 +353,46 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
     console.log("Usage: node workflow/tools/local/main.mjs [--output-root PATH] [--input FILE_OR_DIR] [--feedback JSONL] [--llm-mode disabled|mock|real] [--email ADDRESS] [--force-resend]\nThe sender transport must be configured by the deployer.");
     return { ok: true, help: true };
   }
-  const result = await runLocalPipeline(options, dependencies);
+  const runRoot = path.join(path.resolve(options.outputRoot || "."), "runs");
+  const profile = String(process.env.PAPERECHO_RUN_PROFILE || "standard");
+  const configHash = String(process.env.PAPERECHO_CONFIG_HASH || canonicalQueryHash({ mode: "local", profile, outputRoot: options.outputRoot }));
+  const inputHash = String(process.env.PAPERECHO_INPUT_HASH || canonicalQueryHash({ mode: "local", input: options.input || "", feedback: options.feedback || "" }));
+  let result;
+  if (options.resume) {
+    if (!/-fixed-launcher\/runner$/.test(String(process.env.PAPERECHO_LAUNCHER_ID || ""))) throw new Error("RECOVERY_CONTROLLED_LAUNCHER_REQUIRED");
+    result = await resumeRunFromLedger({
+      runRoot,
+      runId: options.resume,
+      mode: "local",
+      profile,
+      configHash,
+      inputHash: "",
+      buildReconcilers: async ({ store, artifact }) => buildLocalRecoveryReconcilers({
+        store,
+        artifact,
+        outputRoot: options.outputRoot,
+        sharedIndexPath: dependencies.sharedIndexPath,
+        exportExecutor: async (operation) => {
+          const repository = await new LocalRepository(options.outputRoot, { sharedIndexPath: dependencies.sharedIndexPath }).load();
+          const sourcePath = String(operation.intent?.sourcePath || "");
+          if (!sourcePath || await hashFile(sourcePath) !== operation.intent?.sourceHash) throw new Error("RECOVERY_LOCAL_EXPORT_SOURCE_HASH_MISMATCH");
+          const exportDayDir = path.join(repository.exportsDir, options.resume);
+          const source = JSON.parse(await fs.readFile(sourcePath, "utf8"));
+          const paths = { sourcePath, reviewRoot: repository.exportsDir, reviewMonthDir: repository.exportsDir, reviewDayDir: exportDayDir, requestedOutputPath: String(operation.intent?.requestedOutputPath || path.join(exportDayDir, "周报.xlsx")), exportInputFiles: [sourcePath] };
+          const labels = { dateStr: new Date().toISOString().slice(0, 10), reviewMonthLabel: "Local", reviewDayLabel: options.resume };
+          const exportRunner = dependencies.runStage4Export || (await import("../stage4/export_execution_step.mjs")).runStage4WorkbookExport;
+          const exported = await exportRunner({ paths, labels, source });
+          return { outputPath: exported.exportAudit.actual_output_path, exportAudit: exported.exportAudit };
+        },
+      }),
+    }, dependencies);
+  } else {
+    const runId = `local-${new Date().toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`;
+    const recoveryCoordinator = await createRunRecoveryCoordinator({ runRoot, runId, mode: "local", profile, launcherId: String(process.env.PAPERECHO_LAUNCHER_ID || "local-controlled-entry"), configHash, inputHash, artifactPath: path.join(runRoot, runId, "input_artifact.json") }, dependencies);
+    result = await runLocalPipeline({ ...options, runId, recoveryCoordinator }, dependencies);
+  }
   console.log(JSON.stringify(result));
-  console.log(formatTimingSummary(result.timings));
+  if (result.timings) console.log(formatTimingSummary(result.timings));
   return result;
 }
 

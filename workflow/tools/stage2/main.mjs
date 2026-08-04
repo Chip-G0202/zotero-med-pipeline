@@ -100,7 +100,7 @@ export function resolveWritebackCollectionNames(now, env = process.env) {
   };
 }
 
-export async function migrateRatedItems({ rootKey, worthyKey, now, zoteroBackendCall, mcpToolCall, starMigrationConfig, collectionGuard = null, collectionScopeBlocks = null, localLibraryIndex = null }) {
+export async function migrateRatedItems({ rootKey, worthyKey, now, zoteroBackendCall, mcpToolCall, starMigrationConfig, collectionGuard = null, collectionScopeBlocks = null, localLibraryIndex = null, recovery = null }) {
   return runStarMigration({
     rootKey,
     worthyKey,
@@ -113,6 +113,7 @@ export async function migrateRatedItems({ rootKey, worthyKey, now, zoteroBackend
     getCollectionItemKeys,
     addItemToWorthyCollectionWithGuard,
     removeItemFromCollectionWithGuard,
+    recovery,
   });
 }
 export async function runZoteroWriteback({ argv = process.argv, recovery = null, launchDesktop } = {}) {
@@ -166,6 +167,7 @@ export async function runZoteroWriteback({ argv = process.argv, recovery = null,
       generated_at: new Date().toISOString(),
     };
     await fs.writeFile(summaryPath, JSON.stringify(emptySummary, null, 2), "utf8");
+    if (recovery?.store) await recovery.store.setStage("stage2_writeback", "verified", { skipped: true, reason: "no_abc_items" });
     return { ok: true, skipped: true, reason: "no_abc_items" };
   }
 
@@ -202,10 +204,14 @@ export async function runZoteroWriteback({ argv = process.argv, recovery = null,
     };
     await fs.mkdir(pipelineDir, { recursive: true });
     await fs.writeFile(dryRunSummaryPath, JSON.stringify(summary, null, 2), "utf8");
+    if (recovery?.store) await recovery.store.setStage("stage2_writeback", "verified", { skipped: true, reason: "dry_run" });
     console.log(JSON.stringify(summary, null, 2));
     return summary;
   }
 
+  const collectionSetupOperation = typeof recovery?.prepareCollectionSetup === "function"
+    ? await recovery.prepareCollectionSetup(["文献池", "待删除", "值得精读", zoteroMonthName, zoteroDayName, ...Object.values(SOURCE_COLLECTIONS), ...Object.values(GRADE_COLLECTIONS)])
+    : null;
   await ensureZoteroBackendReadyForWriteback({ launchDesktop });
   const zoteroBackend = (await getZoteroBackendClient()).callTool.adapter;
 
@@ -258,7 +264,17 @@ export async function runZoteroWriteback({ argv = process.argv, recovery = null,
   } = writebackCollections;
   collectionGuard = writebackCollections.collectionGuard;
   const collectionSetupMs = Date.now() - collectionSetupStarted;
-  if (recovery) await recovery.recordCollections(collectionRecords);
+  if (collectionSetupOperation) await recovery.completeCollectionSetup(collectionSetupOperation, collectionRecords);
+  if (typeof recovery?.prepareStage2 === "function") {
+    await recovery.prepareStage2({
+      items,
+      sourceKeys,
+      gradeKeys,
+      resolveSourceName: (item) => SOURCE_COLLECTIONS[item?.source_channel] || SOURCE_COLLECTIONS.rss,
+      resolveGradeName,
+      indexPath: ZOTERO_LIBRARY_INDEX_PATH,
+    });
+  } else if (recovery) await recovery.recordCollections(collectionRecords);
   const createItem = createStage2ItemWriter({
     zoteroBackend,
     zoteroBackendCall: zoteroBackendToolCall,
@@ -369,7 +385,7 @@ export async function runZoteroWriteback({ argv = process.argv, recovery = null,
   }
   const tagCleanupMs = Date.now() - tagCleanupStarted;
   const migrationStarted = Date.now();
-  const migrationStats = await migrateRatedItems({ rootKey: root.key, worthyKey: worthy?.key || null, now: TODAY, zoteroBackendCall: zoteroBackendToolCall, starMigrationConfig, collectionGuard, collectionScopeBlocks, localLibraryIndex });
+  const migrationStats = await migrateRatedItems({ rootKey: root.key, worthyKey: worthy?.key || null, now: TODAY, zoteroBackendCall: zoteroBackendToolCall, starMigrationConfig, collectionGuard, collectionScopeBlocks, localLibraryIndex, recovery });
   const migratedIndexItemCount = applyStarMigrationToLiveIndex(currentLiveItems, migrationStats, { rootKey: root.key, worthyKey: worthy?.key || "" });
   localIndexStats.star_migration_index_items_updated = migratedIndexItemCount;
   const migrationMs = Date.now() - migrationStarted;
@@ -447,6 +463,7 @@ export async function runZoteroWriteback({ argv = process.argv, recovery = null,
     worthyItemCount,
     historyCollectionModificationForbidden: HISTORY_COLLECTION_MODIFICATION_FORBIDDEN,
   });
+  if (typeof recovery?.completeStage2 === "function") await recovery.completeStage2({ summary, indexPath: ZOTERO_LIBRARY_INDEX_PATH });
   console.log(JSON.stringify(summary, null, 2));
   return summary;
 }

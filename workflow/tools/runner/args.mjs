@@ -1,8 +1,9 @@
 import path from "node:path";
 
 import { MODES, PROFILES } from "./constants.mjs";
+import { validateRecoveryRunId } from "../recovery/operation_ledger.mjs";
 
-const VALUE_ARGS = new Set(["mode", "profile", "email", "input", "output-root", "feedback", "llm-mode", "config"]);
+const VALUE_ARGS = new Set(["mode", "profile", "email", "input", "output-root", "feedback", "llm-mode", "config", "resume"]);
 const BOOLEAN_ARGS = new Set(["check", "run", "force-resend", "require-llm", "fixed-mode"]);
 
 export function parseRunnerArgs(argv = process.argv.slice(2), { cwd = process.cwd(), allowUnresolvedMode = false } = {}) {
@@ -28,6 +29,8 @@ export function parseRunnerArgs(argv = process.argv.slice(2), { cwd = process.cw
   if (values.mode && !MODES.has(values.mode)) throw new Error(`RUNNER_MODE_INVALID:${values.mode}`);
   if (!values.mode && !allowUnresolvedMode && !values.config) throw new Error("RUNNER_MODE_INVALID:missing");
   if (flags.has("check") === flags.has("run")) throw new Error("RUNNER_ACTION_EXACTLY_ONE_REQUIRED");
+  if (values.resume && flags.has("check")) throw new Error("RUNNER_RESUME_REQUIRES_RUN");
+  if (values.resume && !flags.has("fixed-mode")) throw new Error("RUNNER_RESUME_FIXED_LAUNCHER_REQUIRED");
   const profile = values.profile || "standard";
   if (!PROFILES.has(profile)) throw new Error(`RUNNER_PROFILE_INVALID:${profile}`);
   if (values["llm-mode"] && !["disabled", "mock", "real"].includes(values["llm-mode"])) throw new Error("RUNNER_LLM_MODE_INVALID");
@@ -48,6 +51,7 @@ export function parseRunnerArgs(argv = process.argv.slice(2), { cwd = process.cw
     outputRoot: resolveOptional("output-root"),
     feedback: resolveOptional("feedback"),
     configPath: resolveOptional("config"),
+    resume: values.resume ? validateRecoveryRunId(values.resume) : "",
     llmMode: flags.has("require-llm") ? "real" : (values["llm-mode"] || ""),
     forceResend: flags.has("force-resend"),
     requireLlm: flags.has("require-llm"),
@@ -60,6 +64,7 @@ export function parseRunnerArgs(argv = process.argv.slice(2), { cwd = process.cw
       feedback: Boolean(values.feedback),
       llmMode: Boolean(values["llm-mode"]),
       config: Boolean(values.config),
+      resume: Boolean(values.resume),
     },
   };
 }

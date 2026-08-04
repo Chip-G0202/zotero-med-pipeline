@@ -43,7 +43,7 @@ async function ensureZoteroBackendReadyForBackfill() {
   return ensureZoteroBackendReady();
 }
 
-export async function runZoteroTranslationBackfill({ argv = process.argv } = {}) {
+export async function runZoteroTranslationBackfill({ argv = process.argv, recovery = null } = {}) {
   const stageStarted = Date.now();
   await ensureZoteroBackendReadyForBackfill();
   const dateStr = fmtDateRfc(TODAY);
@@ -78,7 +78,9 @@ export async function runZoteroTranslationBackfill({ argv = process.argv } = {})
     apply: true,
     dryRun: false,
     writeMetadataTool: async (itemKey, fields) => {
+      const operations = typeof recovery?.prepareMetadata === "function" ? await recovery.prepareMetadata([{ itemKey, fields }]) : [];
       await zoteroBackendToolCall("write_metadata", { itemKey, fields }, 980000 + Math.floor(Math.random() * 10000));
+      if (operations.length) await recovery.completeMetadata(operations, { updated: [itemKey], failed: [], versions: {} });
     },
   });
   const writeMetadataBatch = createStage3WriteMetadataBatch({
@@ -87,8 +89,11 @@ export async function runZoteroTranslationBackfill({ argv = process.argv } = {})
     apply: true,
     dryRun: false,
     writeMetadataBatchTool: async (updates) => {
+      const operations = typeof recovery?.prepareMetadata === "function" ? await recovery.prepareMetadata(updates) : [];
       const client = await getZoteroBackendClient();
-      return createStage3WriteMetadataBatchTool({ zoteroBackendCall: client.callTool })(updates);
+      const result = await createStage3WriteMetadataBatchTool({ zoteroBackendCall: client.callTool })(updates);
+      if (operations.length) await recovery.completeMetadata(operations, result);
+      return result;
     },
   });
 
@@ -107,7 +112,11 @@ export async function runZoteroTranslationBackfill({ argv = process.argv } = {})
       ...(Number(item.version || 0) > 0 ? { version: Number(item.version) } : {}),
     };
   }
+  const indexOperation = Object.keys(indexUpdates).length && typeof recovery?.prepareFileOperation === "function"
+    ? await recovery.prepareFileOperation({ type: "shared_index", targetId: ZOTERO_LIBRARY_INDEX_PATH, targetPath: ZOTERO_LIBRARY_INDEX_PATH, input: indexUpdates, intent: { updates: indexUpdates } })
+    : null;
   const localIndexUpdate = await updateZoteroLibraryIndexItems(ZOTERO_LIBRARY_INDEX_PATH, indexUpdates);
+  if (indexOperation) await recovery.completeFileOperation(indexOperation, ZOTERO_LIBRARY_INDEX_PATH, { itemCount: Object.keys(indexUpdates).length });
   const output = await writeStage3TranslationReports({
     dateStr,
     stageStarted,
@@ -118,6 +127,7 @@ export async function runZoteroTranslationBackfill({ argv = process.argv } = {})
     ...input,
     ...execution,
   });
+  if (recovery?.store) await recovery.store.setStage("stage3_translation", "verified", { updated: execution.report?.updated_items?.length || 0 });
 
   console.log(JSON.stringify(output, null, 2));
   return { dateStr, week, day, output };

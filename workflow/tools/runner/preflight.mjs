@@ -9,6 +9,7 @@ import { resolveStage5Request } from "../stage5/main.mjs";
 import { resolveLlmRuntime } from "../lib/llm_json_support.mjs";
 import { buildRuntimeConfig } from "../lib/runtime_config.mjs";
 import { RUNNER_SCHEMA_VERSION } from "./constants.mjs";
+import { canonicalQueryHash } from "../stage1/source_state.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const ENTRY_BY_MODE = Object.freeze({
@@ -86,11 +87,15 @@ function unsafeOutputRoot(value, { repoRoot = REPO_ROOT, homeDir = os.homedir() 
 
 function retryCommand(options) {
   const parts = ["node", LAUNCHER_BY_MODE[options.mode], "--run", "--profile", options.profile];
+  if (options.resume) parts.push("--resume", options.resume);
   if (options.configPath) parts.push("--config", safePath(options.configPath));
-  if (options.mode === "local") parts.push("--input", "<file>", "--output-root", "<path>");
-  if (options.email) parts.push("--email", "<recipient>");
-  if (options.requireLlm) parts.push("--require-llm");
-  if (options.forceResend) parts.push("--force-resend");
+  if (options.mode === "local") {
+    if (!options.resume) parts.push("--input", "<file>");
+    parts.push("--output-root", "<path>");
+  }
+  if (!options.resume && options.email) parts.push("--email", "<recipient>");
+  if (!options.resume && options.requireLlm) parts.push("--require-llm");
+  if (!options.resume && options.forceResend) parts.push("--force-resend");
   return parts.join(" ");
 }
 
@@ -98,12 +103,14 @@ export function buildExecutionPlan(options, { env = process.env, repoRoot = REPO
   const entry = path.resolve(entries[options.mode]);
   const args = [];
   if (options.mode === "local") {
-    args.push("--input", options.input, "--output-root", options.outputRoot);
-    if (options.feedback) args.push("--feedback", options.feedback);
+    if (!options.resume && options.input) args.push("--input", options.input);
+    args.push("--output-root", options.outputRoot);
+    if (!options.resume && options.feedback) args.push("--feedback", options.feedback);
   }
-  if (options.llmMode) args.push("--llm-mode", options.llmMode);
-  if (options.email) args.push("--email", options.email);
-  if (options.forceResend) args.push("--force-resend");
+  if (!options.resume && options.llmMode) args.push("--llm-mode", options.llmMode);
+  if (!options.resume && options.email) args.push("--email", options.email);
+  if (!options.resume && options.forceResend) args.push("--force-resend");
+  if (options.resume) args.push("--resume", options.resume);
   const childEnv = { ...env };
   if (options.mode === "desktop") {
     childEnv.ZOTERO_BACKEND = "cli";
@@ -113,6 +120,10 @@ export function buildExecutionPlan(options, { env = process.env, repoRoot = REPO
   } else {
     for (const name of ["ZOTERO_BACKEND", "ZOTERO_API_KEY", "ZOTERO_USER_ID", "ZOTERO_EXE"]) delete childEnv[name];
   }
+  childEnv.PAPERECHO_CONFIG_HASH = options.recoveryConfigHash || canonicalQueryHash({ mode: options.mode, profile: options.profile });
+  childEnv.PAPERECHO_INPUT_HASH = options.recoveryInputHash || canonicalQueryHash({ mode: options.mode, input: options.input || "", feedback: options.feedback || "" });
+  childEnv.PAPERECHO_RUN_PROFILE = options.profile;
+  childEnv.PAPERECHO_LAUNCHER_ID = `${options.mode}-fixed-launcher/runner`;
   const runtime = options.mode === "local" ? null : buildRuntimeConfig({ cwd: repoRoot, env, argv: [process.execPath, entry, ...args] });
   const runRoot = options.mode === "local" ? path.join(options.outputRoot, "runs") : path.join(runtime.reviewRoot, "runs");
   return { entry, args, childEnv, cwd: repoRoot, runRoot, emailRequested: Boolean(resolveStage5Request(options.email ? ["--email", options.email] : [], env).recipient) };
@@ -166,9 +177,9 @@ export async function runPreflight(options, dependencies = {}) {
   }
 
   if (options.mode === "local") {
-    if (!options.input) requiredMissing.push({ ...missing("local.input", "读取 Local JSON/JSONL 文献", "设置 local.input 或 --input", "input"), section: "local" });
+    if (!options.input && !options.resume) requiredMissing.push({ ...missing("local.input", "读取 Local JSON/JSONL 文献", "设置 local.input 或 --input", "input"), section: "local" });
     if (!options.outputRoot) requiredMissing.push({ ...missing("local.outputRoot", "隔离 Local state/exports", "设置 local.outputRoot 或 --output-root", "input"), section: "local" });
-    if (options.input) {
+    if (options.input && !options.resume) {
       try {
         const stat = await fsApi.stat(options.input);
         let supported = stat.isFile() && [".json", ".jsonl"].includes(path.extname(options.input).toLowerCase());
@@ -185,7 +196,7 @@ export async function runPreflight(options, dependencies = {}) {
         requiredMissing.push({ ...missing("readable Local input", "导入本地文献", "检查 local.input/--input 路径和读取权限", "input"), section: "local" });
       }
     }
-    if (options.feedback) {
+    if (options.feedback && !options.resume) {
       try {
         const stat = await fsApi.stat(options.feedback);
         if (!stat.isFile() || path.extname(options.feedback).toLowerCase() !== ".jsonl") throw new Error("unsupported");
@@ -211,7 +222,7 @@ export async function runPreflight(options, dependencies = {}) {
   }
 
   const stage5Request = resolveStage5Request(options.email ? ["--email", options.email] : [], env);
-  const emailRequested = Boolean(stage5Request.recipient);
+  const emailRequested = Boolean(stage5Request.recipient) && !options.resume;
   if (emailRequested) {
     const smtp = emailTransportConfig(env);
     if (smtp.configured) {
@@ -223,13 +234,13 @@ export async function runPreflight(options, dependencies = {}) {
   } else optionalMissing.push(optional("Stage5 recipient", "启用邮件通知", "使用 --email、PAPERFLOW_REPORT_TO 或 NOTIFICATION_EMAIL"));
 
   const llmRuntime = dependencies.resolveLlmRuntimeImpl ? dependencies.resolveLlmRuntimeImpl({ env }) : resolveLlmRuntime({ env });
-  if (options.requireLlm && !llmRuntime.apiKeyConfigured) {
+  if (options.requireLlm && !options.resume && !llmRuntime.apiKeyConfigured) {
     requiredMissing.push({ ...missing("PREFERENCE_LEARNING_API_KEY or TITLE_TRANSLATION_API_KEY", "明确要求的真实 LLM 功能", "通过 common.llm 的 env 引用在环境或本地 .env 中配置", "configuration"), section: "common" });
   } else if (!llmRuntime.apiKeyConfigured) {
     featureMissing.push(optional("real LLM credentials", "真实语义学习、翻译与概况", "standard 允许生产代码现有 fallback；需要时使用 --require-llm"));
   }
 
-  if (options.profile === "complete" && !options.requireLlm) warnings.push("complete 仅强制用户明确请求的功能；未隐式要求真实 LLM");
+  if (options.profile === "complete" && !options.requireLlm && !options.resume) warnings.push("complete 仅强制用户明确请求的功能；未隐式要求真实 LLM");
   const canRun = requiredMissing.length === 0;
   const retry = retryCommand(options);
   const requiredWithRetry = requiredMissing.map((item) => ({ ...item, retryCommand: retry }));

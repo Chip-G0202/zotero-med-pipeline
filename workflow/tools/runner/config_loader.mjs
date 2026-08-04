@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { MODES, PROFILES, RUNNER_SCHEMA_VERSION } from "./constants.mjs";
+import { canonicalQueryHash } from "../stage1/source_state.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const DEFAULT_CONFIG_PATH = path.join(REPO_ROOT, "config", "paperecho.config.json");
@@ -302,6 +303,11 @@ export async function resolveRunnerConfiguration(cliOptions, dependencies = {}) 
       secretStatus,
     },
     configWarnings: warnings,
+    recoveryConfigHash: canonicalQueryHash({
+      schemaVersion: config?.schemaVersion || RUNNER_SCHEMA_VERSION,
+      config: config || {},
+      effective: { mode, profile, llmMode, requireLlm, emailRequested: Boolean(email) },
+    }),
   };
   return { options, env: effectiveEnv, config, warnings };
 }

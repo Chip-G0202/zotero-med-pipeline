@@ -11,6 +11,7 @@ import nodeFsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
 
 import { checkZoteroBackendReadyStage } from "./check_zotero_backend_ready.mjs";
 import { finalizeResearchOsExports, markFinalizeExportsFailure } from "../stage4/main.mjs";
@@ -24,6 +25,10 @@ import { ensureWorkflowStartupReady } from "../lib/workflow_startup_ready.mjs";
 import { writeWorkflowPerformanceSummary } from "./performance_summary.mjs";
 import { buildExportManifest, buildRunSummary, pipelineModeFromBackend } from "../lib/run_summary.mjs";
 import { resolveStage5Request, runStage5Notification } from "../stage5/main.mjs";
+import { recipientHash } from "../stage5/email_receipt.mjs";
+import { canonicalQueryHash } from "../stage1/source_state.mjs";
+import { createRunRecoveryCoordinator, resumeRunFromLedger } from "../recovery/run_recovery.mjs";
+import { buildZoteroRecoveryReconcilers } from "../recovery/zotero_reconciliation.mjs";
 import { dayLabel, monthLabel } from "../lib/report_period_support.mjs";
 import {
   finishRunGroup,
@@ -196,8 +201,9 @@ export async function runZoteroLiteratureFilter({
   argv = process.argv.slice(2),
   env = process.env,
   stage5Runner = runStage5Notification,
+  runId = `zlf-${Date.now()}-${randomUUID().slice(0, 8)}`,
+  recoveryCoordinator = null,
 } = {}) {
-  const runId = `zlf-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const startedAt = iso(clock());
   const manualTrigger = runMode.isManualOrForce;
   const runtimeSafety = buildRuntimeSafetyConfig({ runtime: config });
@@ -285,20 +291,26 @@ export async function runZoteroLiteratureFilter({
         housekeeping.warnings = [...(housekeeping.warnings || []), String(error?.message || error)];
       }
     }
+    if (recoveryCoordinator) {
+      const allVerified = recoveryCoordinator.store.ledger.operations.every((operation) => operation.status === "verified");
+      const reportStatus = String(report?.status || "");
+      await recoveryCoordinator.store.setRunStatus(reportStatus === "skipped" ? "skipped" : reportStatus.includes("failed") ? "failed" : allVerified ? "completed" : "incomplete");
+    }
     return report;
   };
   const baseStageRunner = runCommand
     ? async (stage) => runCommand(stage, config)
     : runStage;
   const runSameProcessStage = async (stage) => {
-    if (!manualTrigger) return baseStageRunner(stage);
     const originalForceRun = process.env.review_results_FORCE_RUN;
     const originalLegacyForceRun = process.env.FORCE_review_results_RUN;
     const originalTrigger = process.env.review_results_ORCHESTRATOR_TRIGGER;
     const originalRunId = process.env.review_results_RUN_ID;
-    process.env.review_results_FORCE_RUN = "true";
-    process.env.FORCE_review_results_RUN = "true";
-    process.env.review_results_ORCHESTRATOR_TRIGGER = "manual";
+    if (manualTrigger) {
+      process.env.review_results_FORCE_RUN = "true";
+      process.env.FORCE_review_results_RUN = "true";
+      process.env.review_results_ORCHESTRATOR_TRIGGER = "manual";
+    }
     process.env.review_results_RUN_ID = runId;
     try {
       return await baseStageRunner(stage);
@@ -325,8 +337,8 @@ export async function runZoteroLiteratureFilter({
   const stageDefs = {
     stage1: makeStage("stage1", scriptPaths.stage1, () => runResearchOsPipeline()),
     zoteroBackendReady: makeStage("zotero_backend_ready", scriptPaths.zoteroReady, () => checkZoteroBackendReadyStage()),
-    stage2: makeStage("stage2_writeback", scriptPaths.stage2, () => runZoteroWriteback({ recovery: stage2Recovery })),
-    stage3: makeStage("stage3_translation", scriptPaths.stage3, () => runZoteroTranslationBackfill()),
+    stage2: makeStage("stage2_writeback", scriptPaths.stage2, () => runZoteroWriteback({ recovery: recoveryCoordinator || stage2Recovery })),
+    stage3: makeStage("stage3_translation", scriptPaths.stage3, () => runZoteroTranslationBackfill({ recovery: recoveryCoordinator })),
     stage4: makeStage("stage4_exports", scriptPaths.stage4, () => finalizeResearchOsExports()),
   };
 
@@ -454,6 +466,11 @@ export async function runZoteroLiteratureFilter({
     await writeReport(report);
     return await completeRunGroup(report);
   }
+  if (recoveryCoordinator) {
+    const artifactItems = Array.isArray(stage1Artifacts.data) ? stage1Artifacts.data : [];
+    await recoveryCoordinator.persistArtifact(stage1Artifacts.data, artifactItems);
+    await recoveryCoordinator.store.setStage("stage1", "verified", { artifactHash: recoveryCoordinator.store.ledger.artifact.hash, identityCount: artifactItems.length });
+  }
 
   if (dryRun) {
     stages.push(skippedStage(stageDefs.zoteroBackendReady.name, stageDefs.zoteroBackendReady.scriptPath, "dry_run", clock));
@@ -566,6 +583,9 @@ export async function runZoteroLiteratureFilter({
     return await completeRunGroup(report);
   }
 
+  const exportOperation = recoveryCoordinator
+    ? await recoveryCoordinator.prepareFileOperation({ type: "export", targetId: "stage4_weekly_export", targetPath: path.join(config.reviewRoot, monthLabel(config.now), dayLabel(config.now), "周报.xlsx"), input: { artifactHash: recoveryCoordinator.store.ledger.artifact.hash }, retryable: false })
+    : null;
   const stage4 = await executeStage(stageDefs.stage4, runSameProcessStage, clock);
   artifacts.stage4_run_report = await inspectArtifact("stage4_run_report", "run_report.json", stage4.startedAt, config, statArtifact, readJson);
   const stage4ExportAudit = artifacts.stage4_run_report.data?.steps?.stage4_export_audit || null;
@@ -587,11 +607,18 @@ export async function runZoteroLiteratureFilter({
     stage4.status = "failed";
     stage4.stderr = trimLog(`${stage4.stderr}\n[orchestrator] stage4 postcheck failed: reportFresh=${stage4ReportFresh} auditFresh=${stage4AuditFresh} outputFresh=${stage4OutputFresh} outputPath=${stage4OutputPath || "null"}`);
   }
+  if (stage4.exitCode === 0 && exportOperation) {
+    await recoveryCoordinator.completeFileOperation(exportOperation, stage4OutputPath, { stage4ReportFresh, stage4AuditFresh });
+    await recoveryCoordinator.store.setStage("stage4_exports", "verified", { outputPath: stage4OutputPath });
+  }
   stages.push(stage4);
   const stage4Ok = stages.at(-1).exitCode === 0;
   let stage5Notification = { status: "skipped", reason: "stage4_not_completed", attachments: [] };
   if (stage4Ok) {
     const stage5Request = resolveStage5Request(argv, env);
+    const notificationOperation = recoveryCoordinator && stage5Request.recipient
+      ? await recoveryCoordinator.prepareFileOperation({ type: "notification", targetId: recipientHash(stage5Request.recipient), input: { runId, artifactHash: recoveryCoordinator.store.ledger.artifact.hash }, retryable: false })
+      : null;
     let stage4RunSummary = stage4.data?.runSummary || null;
     let literatureItems = stage4.data?.literatureItems || null;
     const resolvedBackend = stages.find((stage) => stage.name === "zotero_backend_ready")?.data?.backend || env.ZOTERO_BACKEND || artifacts.stage4_run_report.data?.backend_selected;
@@ -612,6 +639,15 @@ export async function runZoteroLiteratureFilter({
     }
     stage4RunSummary = { ...stage4RunSummary, pipelineMode: pipelineModeFromBackend(resolvedBackend), finishedAt: stage4RunSummary.finishedAt || iso(clock()) };
     stage5Notification = await stage5Runner({ runSummary: stage4RunSummary, literatureItems: literatureItems || [], recipient: stage5Request.recipient, forceResend: stage5Request.forceResend, config: { runStateRoot: runStateRoot(runRoot, runId) } });
+    if (notificationOperation && (stage5Notification.status === "sent" || (stage5Notification.status === "skipped" && stage5Notification.reason === "already_sent"))) {
+      await recoveryCoordinator.completeNotification(notificationOperation, stage5Notification);
+      await recoveryCoordinator.store.setStage("stage5_notification", "verified", { status: stage5Notification.status });
+    } else if (notificationOperation) {
+      await recoveryCoordinator.store.transition(notificationOperation.idempotencyKey, "failed", { error: `STAGE5_${String(stage5Notification.status || "unknown").toUpperCase()}` });
+      await recoveryCoordinator.store.setStage("stage5_notification", "failed", { status: stage5Notification.status });
+    } else if (recoveryCoordinator) {
+      await recoveryCoordinator.store.setStage("stage5_notification", "verified", { status: "skipped", reason: stage5Notification.reason });
+    }
   }
   try {
     const performance = await writeWorkflowPerformanceSummary({
@@ -678,10 +714,53 @@ async function main() {
   const config = overrideNow ? buildRuntimeConfig({ now: overrideNow }) : buildRuntimeConfig();
   _emergencyPipelineDir = config.pipelineDir;
   let report;
+  let attemptedResumeRunId = "";
   try {
-    report = await runZoteroLiteratureFilter({ triggerMode: runMode.triggerMode, runMode, config });
+    const resumeToken = (process.argv || []).find((value) => value === "--resume" || String(value).startsWith("--resume="));
+    const resumeIndex = (process.argv || []).indexOf("--resume");
+    const resumeRunId = resumeToken
+      ? (String(resumeToken).startsWith("--resume=") ? String(resumeToken).slice("--resume=".length) : String(process.argv[resumeIndex + 1] || ""))
+      : "";
+    attemptedResumeRunId = resumeRunId;
+    if (resumeRunId && !/-fixed-launcher\/runner$/.test(String(process.env.PAPERECHO_LAUNCHER_ID || ""))) throw new Error("RECOVERY_CONTROLLED_LAUNCHER_REQUIRED");
+    const pipelineMode = pipelineModeFromBackend(process.env.ZOTERO_BACKEND);
+    const profile = String(process.env.PAPERECHO_RUN_PROFILE || "standard");
+    const configHash = String(process.env.PAPERECHO_CONFIG_HASH || canonicalQueryHash({ mode: pipelineMode, profile, repoRoot: config.repoRoot, projectRoot: config.projectRoot }));
+    const inputHash = String(process.env.PAPERECHO_INPUT_HASH || canonicalQueryHash({ mode: pipelineMode, profile }));
+    const runRoot = path.join(config.reviewRoot, "runs");
+    if (resumeRunId) {
+      report = await resumeRunFromLedger({
+        runRoot,
+        runId: resumeRunId,
+        mode: pipelineMode,
+        profile,
+        configHash,
+        inputHash: "",
+        buildReconcilers: async ({ store, artifact }) => {
+          await ensureWorkflowStartupReady();
+          return buildZoteroRecoveryReconcilers({ store, artifact, exportExecutor: () => finalizeResearchOsExports() });
+        },
+      });
+    } else {
+      const runId = `zlf-${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const recoveryCoordinator = await createRunRecoveryCoordinator({
+        runRoot,
+        runId,
+        mode: pipelineMode,
+        profile,
+        launcherId: String(process.env.PAPERECHO_LAUNCHER_ID || "stage0-controlled-entry"),
+        configHash,
+        inputHash,
+        artifactPath: path.join(runRoot, runId, "input_artifact.json"),
+      });
+      report = await runZoteroLiteratureFilter({ triggerMode: runMode.triggerMode, runMode, config, runId, recoveryCoordinator });
+    }
     orchestratorReportWritten = true;
   } catch (orchestratorErr) {
+    if (attemptedResumeRunId) {
+      report = { runId: attemptedResumeRunId, resume: true, status: "failed", reason: String(orchestratorErr?.message || orchestratorErr).slice(0, 240) };
+      orchestratorReportWritten = true;
+    } else {
     // Emergency fallback: write a minimal report so downstream diagnostics work.
     const pipelineDir = buildRuntimeConfig().pipelineDir;
     const errMsg = String(orchestratorErr?.stack || orchestratorErr?.message || orchestratorErr);
@@ -700,6 +779,7 @@ async function main() {
       try { process.stderr.write(`[orchestrator] emergency report write also failed: ${writeErr}\n`); } catch {}
     }
     report = { status: "orchestrator_crash" };
+    }
   }
   console.log(JSON.stringify(report, null, 2));
   process.exit(["completed", "completed_stage1_only", "degraded_due_to_zotero_backend_unavailable", "skipped"].includes(report.status) ? 0 : 1);

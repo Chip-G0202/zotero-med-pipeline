@@ -1,6 +1,7 @@
 import { readItemDetails, readSubcollections } from "../lib/writeback_support.mjs";
 import { LABELS } from "../lib/grade_primitives.mjs";
 import { recordCollectionScopeBlock } from "../lib/zotero_collection_guard.mjs";
+import { getLiteratureIdentityKeys } from "../lib/literature_identity.mjs";
 import {
   collectRecentDateCollectionNodes,
   parseDateNameToDate,
@@ -94,6 +95,7 @@ export async function migrateRatedItems({
   getCollectionItemKeys,
   addItemToWorthyCollectionWithGuard,
   removeItemFromCollectionWithGuard,
+  recovery = null,
 }) {
   const callZotero = zoteroBackendCall || mcpToolCall;
   const migrationConfig = starMigrationConfig || { enabled: true, mode: "legacy", expandAllGrades: false, windowDays: 10, starThreshold: 4 };
@@ -220,6 +222,10 @@ export async function migrateRatedItems({
       return;
     }
 
+    const identity = getLiteratureIdentityKeys(data)[0] || `item:${itemKey}`;
+    const addOperation = typeof recovery?.prepareMembership === "function"
+      ? await recovery.prepareMembership({ type: "zotero_collection_add", itemKey, collectionId: worthyKey, identity, role: "worthy_target" })
+      : null;
     const addResult = await addItemToWorthyCollectionWithGuard({
       itemKey,
       worthyKey,
@@ -230,6 +236,7 @@ export async function migrateRatedItems({
       apply: true,
       dryRun: false,
     });
+    if (addOperation) await recovery.completeMembership(addOperation, addResult.ok, addResult.write_failures?.[0]?.error);
     if (!addResult.ok) {
       stats.errors.push(...addResult.write_failures);
       stats.add_failures.push(...addResult.write_failures);
@@ -257,6 +264,9 @@ export async function migrateRatedItems({
     for (const collectionKey of collectionsToRemove) {
       try {
         const role = collectionRoleByKey.get(collectionKey) || "date_subcollection";
+        const removeOperation = typeof recovery?.prepareMembership === "function"
+          ? await recovery.prepareMembership({ type: "zotero_collection_remove", itemKey, collectionId: collectionKey, identity, role })
+          : null;
         const result = await removeItemFromCollectionWithGuard({
           itemKey,
           collectionKey,
@@ -269,6 +279,7 @@ export async function migrateRatedItems({
           apply: true,
           dryRun: false,
         });
+        if (removeOperation) await recovery.completeMembership(removeOperation, result.ok, result.write_failures?.[0]?.error);
         if (!result.ok) {
           stats.errors.push(...result.write_failures);
           stats.removal_failures.push(...result.write_failures);
@@ -285,6 +296,9 @@ export async function migrateRatedItems({
       }
     }
 
+    const rootRemoveOperation = typeof recovery?.prepareMembership === "function"
+      ? await recovery.prepareMembership({ type: "zotero_collection_remove", itemKey, collectionId: rootKey, identity, role: "root_pool" })
+      : null;
     const rootRemovalResult = await removeItemFromCollectionWithGuard({
       itemKey,
       collectionKey: rootKey,
@@ -297,6 +311,7 @@ export async function migrateRatedItems({
       apply: true,
       dryRun: false,
     });
+    if (rootRemoveOperation) await recovery.completeMembership(rootRemoveOperation, rootRemovalResult.ok, rootRemovalResult.write_failures?.[0]?.error);
     if (!rootRemovalResult.ok) {
       stats.errors.push(...rootRemovalResult.write_failures);
       stats.removal_failures.push(...rootRemovalResult.write_failures);

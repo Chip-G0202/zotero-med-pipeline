@@ -97,6 +97,31 @@ test("runner argument parser enforces one action and resolves Local paths from i
   assert.equal(parsed.input, path.resolve("C:\\invocation", "folder/input.json"));
   assert.throws(() => parseRunnerArgs(["--mode", "web", "--check", "--run"]), /EXACTLY_ONE/);
   assert.throws(() => parseRunnerArgs(["--mode", "desktop", "--run", "--input", "x"]), /LOCAL_ARGUMENT/);
+  assert.equal(parseRunnerArgs(["--mode", "desktop", "--fixed-mode", "--run", "--resume", "zlf-run-1"]).resume, "zlf-run-1");
+  assert.throws(() => parseRunnerArgs(["--mode", "desktop", "--fixed-mode", "--run", "--resume", "../escape"]), /RUN_ID_INVALID/);
+  assert.throws(() => parseRunnerArgs(["--mode", "desktop", "--fixed-mode", "--check", "--resume", "zlf-run-1"]), /RESUME_REQUIRES_RUN/);
+  assert.throws(() => parseRunnerArgs(["--mode", "desktop", "--run", "--resume", "zlf-run-1"]), /FIXED_LAUNCHER_REQUIRED/);
+});
+
+test("fixed launchers pass resume only through Runner and execution plan preserves it", async (t) => {
+  const paths = await fixture();
+  t.after(() => fs.rm(paths.root, { recursive: true, force: true }));
+  const invocation = buildLauncherInvocation({ mode: "desktop", runnerPath: "runner.mjs", argv: ["--run", "--resume", "zlf-run-1"] });
+  assert.deepEqual(invocation.args.slice(-3), ["--run", "--resume", "zlf-run-1"]);
+  const plan = buildExecutionPlan(localOptions(paths, { action: "run", input: "", resume: "local-run-1", recoveryConfigHash: "a".repeat(64) }), { env: {}, entries: entries(paths.entry), repoRoot: paths.root });
+  assert.deepEqual(plan.args.slice(-2), ["--resume", "local-run-1"]);
+  assert.equal(plan.childEnv.PAPERECHO_CONFIG_HASH, "a".repeat(64));
+});
+
+test("resume preflight uses persisted input and does not require SMTP or LLM execution", async (t) => {
+  const paths = await fixture();
+  t.after(() => fs.rm(paths.root, { recursive: true, force: true }));
+  const options = localOptions(paths, { action: "run", input: "", resume: "local-run-1", email: "configured@example.invalid", requireLlm: true, llmMode: "real" });
+  const result = await runPreflight(options, { env: {}, entries: entries(paths.entry), existsSync: (value) => value === paths.entry, resolveLlmRuntimeImpl: () => ({ apiKeyConfigured: false }) });
+  assert.equal(result.canRun, true);
+  assert.equal(result.requiredMissing.length, 0);
+  assert.equal(result.resolvedArgs.includes("--resume"), true);
+  assert.equal(result.resolvedArgs.includes("--email"), false);
 });
 
 test("--check never calls production entry", async () => {
@@ -250,6 +275,23 @@ test("Local validation marks Stage2/3 and Zotero NOT_APPLICABLE", async () => {
   assert.equal(result.stages.stage3, "NOT_APPLICABLE");
   assert.equal(result.localZotero, "NOT_APPLICABLE");
   assert.equal(result.monthly, "NOT_APPLICABLE");
+});
+
+test("resume validation accepts only the requested persisted run", async () => {
+  const runId = "local-run-1";
+  const result = await validateProductionResult({
+    options: { mode: "local", resume: runId }, plan: { runRoot: "runs" },
+    processResult: { code: 0, signal: null, stdout: JSON.stringify({ run_id: runId, resume: true, status: "completed" }), stderr: "" },
+    fsApi: { async readFile() { return JSON.stringify(completeManifest("local", runId)); } },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.resume, true);
+  const mismatch = await validateProductionResult({
+    options: { mode: "local", resume: "other-run" }, plan: { runRoot: "runs" },
+    processResult: { code: 0, signal: null, stdout: JSON.stringify({ run_id: runId, resume: true, status: "completed" }), stderr: "" },
+    fsApi: { async readFile() { return JSON.stringify(completeManifest("local", runId)); } },
+  });
+  assert.equal(mismatch.reason, "resume_result_mismatch");
 });
 
 test("Stage5 sent/skipped/failed requirements are distinguished", async () => {

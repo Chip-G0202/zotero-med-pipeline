@@ -88,6 +88,11 @@ export async function validateProductionResult({ options, plan, processResult, f
   if (manifest.schemaVersion !== 1) return { ok: false, reason: "run_group_schema_mismatch", runId, exitCode: 6 };
   if (manifest.pipelineMode !== options.mode) return { ok: false, reason: "run_group_mode_mismatch", runId, exitCode: 6 };
   if (manifest.status !== "completed") return { ok: false, reason: "run_group_not_completed", runId, exitCode: 6 };
+  if (options.resume) {
+    if (runId !== options.resume || report.resume !== true) return { ok: false, reason: "resume_result_mismatch", runId, exitCode: 6 };
+    if (report.status !== "completed") return { ok: false, reason: "resume_incomplete", runId, recoveryStatus: report.status, exitCode: 6 };
+    return { ok: true, exitCode: 0, runId, resume: true, manifest: { schemaVersion: manifest.schemaVersion, status: manifest.status, pipelineMode: manifest.pipelineMode }, recoveryStatus: report.status };
+  }
   const stages = stageSummary(options.mode, report);
   if (Object.values(stages).includes("FAILED") || Object.values(stages).includes("MISSING")) return { ok: false, reason: "required_stage_failed", runId, stages, exitCode: 6 };
   const stage5 = stage5State(report);
