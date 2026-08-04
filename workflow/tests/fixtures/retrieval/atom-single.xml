@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom &amp; Medicine</title>
+  <entry>
+    <title>Single Atom Entry</title>
+    <link rel="alternate" href="https://example.org/atom/1" />
+    <summary>Entity: &lt;safe&gt; and DOI 10.5678/atom.2</summary>
+    <author><name>Grace Hopper</name></author>
+  </entry>
+</feed>

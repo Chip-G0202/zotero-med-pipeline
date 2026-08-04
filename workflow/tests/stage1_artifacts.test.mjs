@@ -15,6 +15,7 @@ describe("Stage 1 artifact builders", () => {
       pipelineDir,
       mode: "completed",
       written: true,
+      retrievalWritten: false,
     });
 
     const writebackReady = manifest.required_for_stage2.find((artifact) => artifact.name === "writeback_ready_items.json");
@@ -24,6 +25,8 @@ describe("Stage 1 artifact builders", () => {
     assert.equal(writebackReady.written, true);
     assert.equal(writebackReady.stage_dependency, "stage2");
     assert.equal(writebackReady.guarded_by_orchestrator, true);
+    const retrievalAudit = manifest.audit_outputs.find((artifact) => artifact.name === "retrieval_audit.json");
+    assert.equal(retrievalAudit.written, false);
     assert.equal(JSON.stringify(manifest).includes("full item title"), false);
   });
 

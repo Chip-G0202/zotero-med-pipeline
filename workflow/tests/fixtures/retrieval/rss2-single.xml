@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Research &amp; Health Journal</title>
+    <item>
+      <title><![CDATA[Microplastics & neuroinflammation]]></title>
+      <link>https://example.org/article?x=1&amp;y=2</link>
+      <description><![CDATA[An <b>abstract</b> with DOI 10.1234/ABC.1.]]></description>
+      <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Ada Lovelace</dc:creator>
+    </item>
+  </channel>
+</rss>

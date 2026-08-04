@@ -258,8 +258,15 @@ export async function runResearchOsPipeline({
         db: { items: [], failed: [], config: { databases: [], warnings: [] } },
         openalex: { items: [], failed: [], config: { warnings: [] }, skipped_reason: "fixture_input" },
       }
-    : await runSourceSelectionAndFetch({ root: ROOT, pubmedPmcConfig, now });
-  const { sourceSelection, sourceCollectionSummary, rss, db, openalex } = sourceResult;
+    : await runSourceSelectionAndFetch({
+        root: ROOT,
+        pubmedPmcConfig,
+        now,
+        pipeDir,
+        profile: "weekly",
+        sourceStateRoot: path.join(RESEARCH_ROOT, "source_state"),
+      });
+  const { sourceSelection, sourceCollectionSummary, rss, db, openalex, retrievalAuditPath = "" } = sourceResult;
   const rssEnabled = sourceSelection.enabled_sources?.includes("rss") ?? false;
   const pubmedEnabled = sourceSelection.enabled_sources?.includes("pubmed_pmc") ?? false;
   const openalexEnabled = sourceSelection.enabled_sources?.includes("openalex") ?? false;
@@ -540,6 +547,7 @@ export async function runResearchOsPipeline({
     pipelineDir: pipeDir,
     mode: "completed",
     written: "planned",
+    retrievalWritten: Boolean(retrievalAuditPath),
   });
   const finalArtifactWritesStarted = Date.now();
   await writeStage1CompletedArtifacts({
@@ -575,6 +583,7 @@ export async function runResearchOsPipeline({
     pipelineDir: pipeDir,
     mode: "completed",
     written: true,
+    retrievalWritten: Boolean(retrievalAuditPath),
   });
   await fs.writeFile(path.join(pipeDir, "run_report.json"), JSON.stringify(report, null, 2), "utf8");
 

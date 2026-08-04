@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "5.10.1",
     "nodemailer": "^9.0.3"
   }
 }

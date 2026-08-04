@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>1</PMID>
+      <Article>
+        <ArticleTitle>First PubMed Article</ArticleTitle>
+        <Abstract><AbstractText Label="BACKGROUND">First abstract.</AbstractText></Abstract>
+        <AuthorList><Author><ForeName>Ada</ForeName><LastName>Lovelace</LastName></Author></AuthorList>
+        <Journal><Title>Journal One</Title><JournalIssue><PubDate><Year>2026</Year><Month>Jul</Month></PubDate></JournalIssue></Journal>
+      </Article>
+    </MedlineCitation>
+    <PubmedData><ArticleIdList><ArticleId IdType="pubmed">1</ArticleId><ArticleId IdType="doi">10.1000/one</ArticleId></ArticleIdList></PubmedData>
+  </PubmedArticle>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>2</PMID>
+      <Article>
+        <ArticleTitle>Second PubMed Article</ArticleTitle>
+        <Abstract><AbstractText>Second abstract.</AbstractText></Abstract>
+        <AuthorList><Author><ForeName>Grace</ForeName><LastName>Hopper</LastName></Author></AuthorList>
+        <Journal><Title>Journal Two</Title></Journal>
+      </Article>
+    </MedlineCitation>
+    <PubmedData><ArticleIdList><ArticleId IdType="pubmed">2</ArticleId><ArticleId IdType="doi">10.1000/two</ArticleId></ArticleIdList></PubmedData>
+  </PubmedArticle>
+</PubmedArticleSet>

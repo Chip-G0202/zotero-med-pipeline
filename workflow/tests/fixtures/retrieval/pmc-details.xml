@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pmc-articleset>
+  <article>
+    <front>
+      <journal-meta><journal-title-group><journal-title>PMC Journal</journal-title></journal-title-group></journal-meta>
+      <article-meta>
+        <article-id pub-id-type="pmc">PMC3</article-id>
+        <article-id pub-id-type="pmid">30</article-id>
+        <article-id pub-id-type="doi">10.1000/pmc</article-id>
+        <title-group><article-title>PMC Article</article-title></title-group>
+        <contrib-group><contrib contrib-type="author"><name><surname>Turing</surname><given-names>Alan</given-names></name></contrib></contrib-group>
+        <abstract><p>PMC abstract.</p></abstract>
+        <pub-date><year>2026</year><month>08</month><day>01</day></pub-date>
+      </article-meta>
+    </front>
+  </article>
+</pmc-articleset>

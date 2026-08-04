@@ -5,8 +5,10 @@
  * executes the enabled sources, and returns the results.
  */
 import { loadSourceSelectionConfig, loadOpenAlexConfig, resolveRetrievalPlan } from "../lib/literature_config.mjs";
+import path from "node:path";
 import { runSelectedRetrievalSources } from "./retrieval_step.mjs";
 import { buildStage1SourceSummary } from "./source_summary.mjs";
+import { commitRetrievalTransaction, RETRIEVAL_AUDIT_SCHEMA_VERSION } from "./source_state.mjs";
 
 /**
  * Run source selection and retrieval.
@@ -17,7 +19,7 @@ import { buildStage1SourceSummary } from "./source_summary.mjs";
  * @param {Object} options.now - Current date
  * @returns {Promise<{merged: Array, sourceSummary: Object, sourceSelection: Object, rss: Object, db: Object, openalex: Object}>}
  */
-export async function runSourceSelectionAndFetch({ root, pubmedPmcConfig, now }) {
+export async function runSourceSelectionAndFetch({ root, pubmedPmcConfig, now, pipeDir = "", profile = "weekly", sourceStateRoot = "", fetchers = {} }) {
   // Load source selection config
   const sourceSelection = loadSourceSelectionConfig({ root });
   const { rssEnabled, pubmedEnabled, openalexEnabled, manualConfirmationRequired } = resolveRetrievalPlan(sourceSelection);
@@ -37,12 +39,38 @@ export async function runSourceSelectionAndFetch({ root, pubmedPmcConfig, now })
   const openAlexCfg = openalexEnabled ? loadOpenAlexConfig({ root }) : null;
 
   // Run retrieval
+  const stateRoot = sourceStateRoot || path.join(root, "review_results", "source_state");
   const { rss, db, openalex } = await runSelectedRetrievalSources({
     root,
     pubmedPmcConfig,
     openAlexConfig: openAlexCfg,
     plan: { rssEnabled, pubmedEnabled, openalexEnabled },
+    profile,
+    stateRoot,
+    now,
+    fetchers,
   });
+
+  let retrievalAuditPath = "";
+  if (pipeDir) {
+    retrievalAuditPath = path.join(pipeDir, "retrieval_audit.json");
+    const sourceAudits = [...(rss.audit || []), ...(db.audit || []), ...(openalex.audit || [])];
+    const artifact = {
+      schemaVersion: RETRIEVAL_AUDIT_SCHEMA_VERSION,
+      profile,
+      generatedAt: new Date(now).toISOString(),
+      complete: rss.failed.length === 0 && db.failed.length === 0 && openalex.failed.length === 0
+        && sourceAudits.every((entry) => entry.complete === true),
+      sources: sourceAudits,
+      candidateCounts: { rss: rss.items.length, pubmedPmc: db.items.length, openalex: openalex.items.length },
+      candidates: { rss: rss.items, pubmedPmc: db.items, openalex: openalex.items },
+    };
+    await commitRetrievalTransaction({
+      artifactPath: retrievalAuditPath,
+      artifact,
+      stateUpdates: [...(rss.stateUpdates || []), ...(db.stateUpdates || []), ...(openalex.stateUpdates || [])],
+    });
+  }
 
   // Build source summary
   const sourceCollectionSummary = buildStage1SourceSummary({
@@ -90,5 +118,6 @@ export async function runSourceSelectionAndFetch({ root, pubmedPmcConfig, now })
     rss,
     db,
     openalex,
+    retrievalAuditPath,
   };
 }

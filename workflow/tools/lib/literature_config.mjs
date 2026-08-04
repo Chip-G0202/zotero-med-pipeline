@@ -291,6 +291,10 @@ export function loadPubMedPmcSearchConfig({ root, now = new Date() } = {}) {
     databases: ["pubmed"],
     days_back: 10,
     retmax: 300,
+    page_size: 500,
+    detail_batch_size: 200,
+    max_results: 100000,
+    overlap_days: 3,
     sort: "date",
     datetype: "pdat",
     query: "(example research term) AND (example method term)",
@@ -298,6 +302,10 @@ export function loadPubMedPmcSearchConfig({ root, now = new Date() } = {}) {
   const { config, path: resolvedPath, warnings } = readJsonConfig(filePath, fallback);
   const daysBack = safePositiveInteger(config.days_back, 10, warnings, "days_back");
   const retmax = safePositiveInteger(config.retmax, 300, warnings, "retmax");
+  const pageSize = safePositiveInteger(config.page_size, 500, warnings, "page_size");
+  const detailBatchSize = safePositiveInteger(config.detail_batch_size, 200, warnings, "detail_batch_size");
+  const maxResults = safePositiveInteger(config.max_results, 100000, warnings, "max_results");
+  const overlapDays = safePositiveInteger(config.overlap_days, 3, warnings, "overlap_days");
   const databases = (Array.isArray(config.databases) ? config.databases : fallback.databases)
     .map((db) => String(db || "").trim().toLowerCase())
     .filter((db) => db === "pubmed" || db === "pmc");
@@ -315,6 +323,10 @@ export function loadPubMedPmcSearchConfig({ root, now = new Date() } = {}) {
     databases,
     days_back: daysBack,
     retmax,
+    page_size: Math.min(pageSize, 10000),
+    detail_batch_size: Math.min(detailBatchSize, 200),
+    max_results: maxResults,
+    overlap_days: overlapDays,
     sort: String(config.sort || fallback.sort),
     datetype: String(config.datetype || fallback.datetype),
     query,
@@ -328,17 +340,20 @@ export function loadPubMedPmcSearchConfig({ root, now = new Date() } = {}) {
   };
 }
 
-export function buildNcbiESearchUrl(cfg, database = "pubmed") {
+export function buildNcbiESearchUrl(cfg, database = "pubmed", options = {}) {
   const params = new URLSearchParams({
     db: database,
     retmode: "json",
-    retmax: String(cfg.retmax || 300),
+    retstart: String(options.retstart || 0),
+    retmax: String(options.retmax || cfg.page_size || cfg.retmax || 300),
     sort: cfg.sort || "date",
-    datetype: cfg.datetype || "pdat",
-    mindate: cfg.minDate,
-    maxdate: cfg.maxDate,
     term: cfg.effective_query || cfg.query,
   });
+  if (options.includeDate !== false) {
+    params.set("datetype", options.datetype || cfg.datetype || "pdat");
+    params.set("mindate", options.minDate || cfg.minDate);
+    params.set("maxdate", options.maxDate || cfg.maxDate);
+  }
   return `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?${params.toString()}`;
 }
 
@@ -434,7 +449,9 @@ export function loadOpenAlexConfig({ root } = {}) {
     enabled: false,
     query: "",
     days_back: 10,
+    overlap_days: 3,
     per_page: 50,
+    max_pages: 10000,
     mailto: "",
     filters: { type: "article", is_oa: null, from_publication_date: null, to_publication_date: null, concepts: [], default_search: "example topic term 010" },
     sort: "relevance_score:desc",
@@ -444,7 +461,9 @@ export function loadOpenAlexConfig({ root } = {}) {
   const enabled = config.enabled === true;
   const query = String(config.query || "").trim();
   const daysBack = safePositiveInteger(config.days_back, 10, warnings, "days_back");
+  const overlapDays = safePositiveInteger(config.overlap_days, 3, warnings, "overlap_days");
   const perPage = safePositiveInteger(config.per_page, 50, warnings, "per_page");
+  const maxPages = safePositiveInteger(config.max_pages, 10000, warnings, "max_pages");
   if (!enabled) {
     warnings.push("openalex_disabled");
   }
@@ -456,7 +475,9 @@ export function loadOpenAlexConfig({ root } = {}) {
     enabled,
     query,
     days_back: daysBack,
+    overlap_days: overlapDays,
     per_page: Math.min(perPage, 200),
+    max_pages: maxPages,
     mailto: String(config.mailto || "").trim(),
     filters: {
       type: String(config.filters?.type || "article"),

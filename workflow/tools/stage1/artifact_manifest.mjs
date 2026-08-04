@@ -25,6 +25,7 @@ export function buildStage1ArtifactManifest({
   pipelineDir = "",
   mode = "completed",
   written = true,
+  retrievalWritten = written,
 } = {}) {
   const isSkipped = mode === "skipped";
   const completedWritten = isSkipped ? "skipped" : written;
@@ -59,6 +60,7 @@ export function buildStage1ArtifactManifest({
       }),
     ],
     audit_outputs: isSkipped ? [] : [
+      artifactEntry({ pipelineDir, name: "retrieval_audit.json", purpose: "Atomic retrieval completeness and source-state commit evidence", written: retrievalWritten }),
       artifactEntry({ pipelineDir, name: "timing_diagnostics.json", purpose: "Stage 1 timing diagnostics", written: "unknown" }),
       artifactEntry({ pipelineDir, name: "manual_standard_evaluation_audit.json", purpose: "Screening standards manual evaluation audit", written: "unknown" }),
       artifactEntry({ pipelineDir, name: "semantic_preference_refinement.json", purpose: "Compatibility report for removed semantic preference refinement", written }),
