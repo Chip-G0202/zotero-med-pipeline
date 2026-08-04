@@ -219,7 +219,8 @@ export class RunRecoveryCoordinator {
   }
 
   async completeNotification(operation, receipt = {}) {
-    await transitionToVerified(this.store, operation, { target: { receiptPath: receipt.receiptPath || "" }, verification: { status: receipt.status, messageId: receipt.messageId || "" } });
+    if (receipt.receiptStatus !== "accepted" && !(receipt.status === "skipped" && receipt.reason === "already_sent")) throw new Error("NOTIFICATION_RECEIPT_NOT_ACCEPTED");
+    await transitionToVerified(this.store, operation, { target: { receiptPath: receipt.receiptPath || operation.target.path || "" }, verification: { status: "accepted", messageId: receipt.messageId || "" } });
   }
 }
 

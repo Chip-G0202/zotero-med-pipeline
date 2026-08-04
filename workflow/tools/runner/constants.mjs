@@ -1,4 +1,5 @@
 export const RUNNER_SCHEMA_VERSION = 1;
+export const SUPPORTED_RUNNER_CONFIG_SCHEMAS = new Set([1, 2]);
 
 export const EXIT_CODES = Object.freeze({
   success: 0,

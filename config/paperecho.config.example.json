@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "mode": null,
   "profile": "standard",
   "common": {
@@ -29,6 +29,29 @@
     "cleanup": {
       "enabled": true,
       "retentionDays": 30
+    },
+    "sourceState": {
+      "root": "../review_results/source_state"
+    },
+    "notifications": {
+      "failure": {
+        "enabled": false
+      },
+      "health": {
+        "enabled": false,
+        "consecutiveThreshold": 2
+      },
+      "receiptStore": {
+        "root": "../review_results/notification_receipts",
+        "retryFailed": true,
+        "unknownPolicy": "hold"
+      }
+    },
+    "radar": {
+      "enabled": false
+    },
+    "integrity": {
+      "enabled": false
     }
   },
   "desktop": {

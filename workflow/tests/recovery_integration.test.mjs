@@ -9,6 +9,7 @@ import { OperationLedgerStore } from "../tools/recovery/operation_ledger.mjs";
 import { reconcileOperationLedger } from "../tools/recovery/reconciliation.mjs";
 import { createRunRecoveryCoordinator, resumeRunFromLedger } from "../tools/recovery/run_recovery.mjs";
 import { buildZoteroRecoveryReconcilers } from "../tools/recovery/zotero_reconciliation.mjs";
+import { createNotificationReceipt, writeNotificationReceipt } from "../tools/stage5/email_receipt.mjs";
 
 const HASH = canonicalQueryHash({ config: "stable" });
 
@@ -93,6 +94,25 @@ test("metadata without a recorded object version stops instead of overwriting", 
   await reconcileOperationLedger({ store, reconcilers: await buildZoteroRecoveryReconcilers({ store, artifact: items, backend }) });
   assert.equal(store.ledger.operations[0].status, "conflict");
   assert.equal(backend.calls.metadata, 0);
+});
+
+test("accepted receipt after SMTP but before ledger verification is adopted, while ambiguous states conflict", async (t) => {
+  for (const receiptStatus of ["accepted", "unknown", "pending"]) {
+    await t.test(receiptStatus, async (t) => {
+      const { store, items, runRoot, runId } = await context(t);
+      const receiptPath = path.join(runRoot, runId, `${receiptStatus}.json`);
+      const receipt = createNotificationReceipt({ notificationType: "run_summary", runId, businessSubject: runId, eventEpoch: runId, payload: { subject: "safe" }, recipient: "reader@example.test" });
+      receipt.status = receiptStatus;
+      receipt.attempts = 1;
+      receipt.lastSmtp = { outcome: receiptStatus, category: receiptStatus, responseCode: null, acceptedCount: receiptStatus === "accepted" ? 1 : 0, rejectedCount: 0 };
+      await writeNotificationReceipt(receiptPath, receipt);
+      const operation = await store.planOperation({ type: "notification", identity: "run", target: { id: receipt.receiptId, path: receiptPath }, input: { payloadHash: receipt.payloadHash }, retryable: false });
+      await store.transition(operation.idempotencyKey, "started");
+      await reconcileOperationLedger({ store, reconcilers: await buildZoteroRecoveryReconcilers({ store, artifact: items, backend: mockBackend() }) });
+      assert.equal(store.ledger.operations[0].status, receiptStatus === "accepted" ? "verified" : "conflict");
+      if (receiptStatus === "pending") assert.equal(JSON.parse(await fs.readFile(receiptPath, "utf8")).status, "unknown");
+    });
+  }
 });
 
 test("resume validates config, input, and artifact hashes before building reconcilers", async (t) => {

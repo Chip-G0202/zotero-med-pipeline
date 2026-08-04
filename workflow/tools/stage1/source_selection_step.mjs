@@ -8,7 +8,7 @@ import { loadSourceSelectionConfig, loadOpenAlexConfig, resolveRetrievalPlan } f
 import path from "node:path";
 import { runSelectedRetrievalSources } from "./retrieval_step.mjs";
 import { buildStage1SourceSummary } from "./source_summary.mjs";
-import { commitRetrievalTransaction, RETRIEVAL_AUDIT_SCHEMA_VERSION } from "./source_state.mjs";
+import { commitRetrievalTransaction, RETRIEVAL_AUDIT_SCHEMA_VERSION, sourceHealthObservations } from "./source_state.mjs";
 
 /**
  * Run source selection and retrieval.
@@ -119,5 +119,6 @@ export async function runSourceSelectionAndFetch({ root, pubmedPmcConfig, now, p
     db,
     openalex,
     retrievalAuditPath,
+    healthObservations: sourceHealthObservations([...(rss.stateUpdates || []), ...(db.stateUpdates || []), ...(openalex.stateUpdates || [])]),
   };
 }

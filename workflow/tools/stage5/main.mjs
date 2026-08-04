@@ -2,8 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { formatStage5Report } from "./report_summary.mjs";
 import { emailTransportConfig, sendStage5Email } from "./email_sender.mjs";
-import { readReceipt, receiptPathFor, recipientHash, withReceiptLock, writeReceipt } from "./email_receipt.mjs";
+import { readNotificationReceipt, receiptPathFor, recipientHash, writeNotificationReceipt } from "./email_receipt.mjs";
 import { generateLiteratureOverview } from "./literature_overview.mjs";
+import { deliverReliableNotification } from "../notification/delivery.mjs";
 
 const MAX_ATTACHMENTS = 2;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
@@ -46,35 +47,57 @@ export async function runStage5Notification({ runSummary, literatureItems = [], 
   if (!String(recipient || "").trim()) return { status: "skipped", reason: "recipient_not_configured", attachments: [] };
   if (!isValidRecipient(recipient)) return { status: "failed", reason: "recipient_invalid", attachments: [] };
   const normalizedRecipient = String(recipient).trim().toLowerCase();
-  const hash = recipientHash(normalizedRecipient);
   const stateRoot = path.resolve(config.runStateRoot || runSummary.outputRoot);
   const receiptPath = receiptPathFor(stateRoot);
   const legacyReceiptPath = receiptPathFor(runSummary.outputRoot);
   const fsApi = config.fsApi || fs;
-  const locked = await withReceiptLock(receiptPath, async () => {
-    const previous = await readReceipt(receiptPath, { fsApi })
-      || (legacyReceiptPath !== receiptPath ? await readReceipt(legacyReceiptPath, { fsApi }) : null);
-    if (!forceResend && previous?.status === "sent" && previous.runId === runSummary.runId && previous.recipientHash === hash) return { status: "skipped", reason: "already_sent", receiptPath, attachments: previous.attachmentNames || [] };
-    let attachments = [];
-    try {
-      attachments = await prepareStage5Attachments(runSummary, { fsApi });
-      if (!transport) {
-        const mailConfig = emailTransportConfig(config.env || process.env);
-        if (!mailConfig.configured) throw Object.assign(new Error(mailConfig.error), { category: mailConfig.missing.length ? "transport_not_configured" : "smtp_config_invalid" });
-      }
-      const overview = await generateLiteratureOverview({ runSummary, literatureItems, llmClient: config.llmClient || null, runtime: config.llmRuntime || null, fsApi, stateRoot, legacyStateRoot: runSummary.outputRoot });
-      const report = formatStage5Report(runSummary, { overview: overview.overview });
-      const result = await (transport || ((message) => sendStage5Email(message, { env: config.env || process.env })))( { ...report, to: normalizedRecipient, attachments });
-      const receipt = { schemaVersion: 1, runId: runSummary.runId, status: "sent", sentAt: new Date().toISOString(), recipientHash: hash, messageId: String(result?.messageId || ""), attachmentNames: attachments.map((item) => item.filename), errorCategory: null };
-      await writeReceipt(receiptPath, receipt, { fsApi });
-      return { status: "sent", reason: "sent", messageId: receipt.messageId, receiptPath, attachments: receipt.attachmentNames };
-    } catch (error) {
-      const missingRetainedArtifact = forceResend && ["attachment_unreadable", "attachment_blocked"].includes(String(error?.category || ""));
-      const errorCategory = missingRetainedArtifact ? "run_artifacts_expired_or_missing" : String(error?.category || "send_failed");
-      const receipt = { schemaVersion: 1, runId: runSummary.runId, status: "failed", sentAt: null, recipientHash: hash, messageId: "", attachmentNames: attachments.map((item) => item.filename), errorCategory };
-      try { await writeReceipt(receiptPath, receipt, { fsApi }); } catch {}
-      return { status: "failed", reason: errorCategory, error: missingRetainedArtifact ? "运行结果已过保留期或附件不存在" : String(error?.message || "SMTP send failed").slice(0, 240), receiptPath, attachments: receipt.attachmentNames };
+  let attachments = [];
+  try {
+    const previous = await readNotificationReceipt(receiptPath, { fsApi, allowLegacy: true })
+      || (legacyReceiptPath !== receiptPath ? await readNotificationReceipt(legacyReceiptPath, { fsApi, allowLegacy: true }) : null);
+    const sameRecipient = previous?.recipientHash === recipientHash(normalizedRecipient) && previous?.runId === runSummary.runId;
+    if (!forceResend && sameRecipient && (previous.status === "accepted" || previous.status === "sent")) return { status: "skipped", reason: "already_sent", receiptStatus: "accepted", messageId: previous.messageId || "", receiptPath, attachments: [] };
+    if (!forceResend && sameRecipient && previous.status === "unknown") return { status: "unknown", reason: "possibly_accepted_no_retry", receiptStatus: "unknown", receiptPath, attachments: [], possibleAccepted: true };
+    if (!forceResend && sameRecipient && previous.schemaVersion === 2 && previous.status === "pending" && previous.attempts > 0) {
+      const uncertain = { ...previous, status: "unknown", updatedAt: new Date().toISOString(), lastSmtp: { outcome: "unknown", category: "interrupted_after_attempt_started", responseCode: null, acceptedCount: 0, rejectedCount: 0 } };
+      await writeNotificationReceipt(receiptPath, uncertain, { fsApi });
+      return { status: "unknown", reason: "possibly_accepted_no_retry", receiptStatus: "unknown", receiptPath, attachments: [], possibleAccepted: true };
     }
-  }, { fsApi });
-  return locked.locked ? locked.value : { status: "skipped", reason: "send_in_progress", receiptPath, attachments: [] };
+    attachments = await prepareStage5Attachments(runSummary, { fsApi });
+    if (!transport) {
+      const mailConfig = emailTransportConfig(config.env || process.env);
+      if (!mailConfig.configured) throw Object.assign(new Error(mailConfig.error), { category: mailConfig.missing.length ? "transport_not_configured" : "smtp_config_invalid" });
+    }
+    const overview = await generateLiteratureOverview({ runSummary, literatureItems, llmClient: config.llmClient || null, runtime: config.llmRuntime || null, fsApi, stateRoot, legacyStateRoot: runSummary.outputRoot });
+    const report = formatStage5Report(runSummary, { overview: overview.overview });
+    const delivery = await deliverReliableNotification({
+      receiptPath,
+      legacyReceiptPath,
+      notificationType: "run_summary",
+      runId: runSummary.runId,
+      businessSubject: runSummary.runId,
+      eventEpoch: runSummary.runId,
+      payload: { ...report, attachments },
+      recipient: normalizedRecipient,
+      ledgerOperationId: config.ledgerOperationId || "",
+      retryFailed: true,
+      force: forceResend,
+      transport: transport || ((message) => sendStage5Email(message, { env: config.env || process.env })),
+      env: config.env || process.env,
+      fsApi,
+      hooks: config.deliveryHooks || {},
+    });
+    if (delivery.status === "accepted") {
+      const already = delivery.reason === "already_accepted";
+      return { status: already ? "skipped" : "sent", reason: already ? "already_sent" : "sent", receiptStatus: "accepted", messageId: delivery.receipt?.messageId || "", receiptPath, attachments: attachments.map((item) => item.filename) };
+    }
+    if (delivery.status === "unknown") return { status: "unknown", reason: delivery.reason, receiptStatus: "unknown", receiptPath, attachments: attachments.map((item) => item.filename), possibleAccepted: true };
+    if (delivery.status === "pending") return { status: "skipped", reason: "send_in_progress", receiptStatus: "pending", receiptPath, attachments: [] };
+    return { status: "failed", reason: delivery.reason, receiptStatus: "failed", receiptPath, attachments: attachments.map((item) => item.filename) };
+  } catch (error) {
+    const missingRetainedArtifact = forceResend && ["attachment_unreadable", "attachment_blocked"].includes(String(error?.category || ""));
+    const reason = missingRetainedArtifact ? "run_artifacts_expired_or_missing" : String(error?.category || "notification_receipt_or_payload_failed");
+    const safeError = missingRetainedArtifact ? "运行结果已过保留期或附件不存在" : ["transport_not_configured", "smtp_config_invalid"].includes(reason) ? String(error?.message || reason).slice(0, 240) : reason;
+    return { status: "failed", reason, error: safeError, receiptStatus: "failed", receiptPath, attachments: attachments.map((item) => item.filename) };
+  }
 }

@@ -27,7 +27,7 @@ async function fixture({ monthly = false } = {}) {
 test("mock transport sends HTML and text with explicit safe attachments and writes receipt", async () => {
   const { root, summary } = await fixture({ monthly: true });
   let captured;
-  const result = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport: async (message) => { captured = message; return { messageId: "mock-1" }; }, config: DISABLED_LLM });
+  const result = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport: async (message) => { captured = message; return { messageId: message.messageId, accepted: true, acceptedCount: 1 }; }, config: DISABLED_LLM });
   assert.equal(result.status, "sent");
   assert.deepEqual(captured.attachments.map((item) => item.filename), ["周报.xlsx", "月报.docx"]);
   assert.doesNotMatch(captured.html, />附件</);
@@ -47,7 +47,8 @@ test("mock transport sends HTML and text with explicit safe attachments and writ
   assert.ok(captured.html.indexOf("分级情况") < captured.html.indexOf("本轮文献概况"));
   assert.doesNotMatch(captured.html, /<script|https?:\/\/|<img/i);
   const receipt = JSON.parse(await fs.readFile(receiptPathFor(root), "utf8"));
-  assert.equal(receipt.status, "sent");
+  assert.equal(receipt.status, "accepted");
+  assert.match(receipt.messageId, /^<paperecho\./);
   assert.equal(receipt.recipientHash.length, 64);
   assert.equal(JSON.stringify(receipt).includes("reader@example.test"), false);
   assert.equal(JSON.stringify(receipt).includes("password"), false);
@@ -98,7 +99,7 @@ test("SMTP config reports only missing required fields and rejects invalid optio
 test("successful receipt prevents duplicates while force resend sends again", async () => {
   const { summary } = await fixture();
   let calls = 0;
-  const transport = async () => ({ messageId: `mock-${++calls}` });
+  const transport = async (message) => { calls += 1; return { messageId: message.messageId, accepted: true, acceptedCount: 1 }; };
   assert.equal((await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport, config: DISABLED_LLM })).status, "sent");
   assert.equal((await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport, config: DISABLED_LLM })).reason, "already_sent");
   assert.equal((await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", forceResend: true, transport, config: DISABLED_LLM })).status, "sent");
@@ -113,7 +114,7 @@ test("force resend reuses the literature overview without another LLM call", asy
     runSummary: summary,
     literatureItems: [{ title: "New paper", abstract: "Study abstract", grade: "A", source: "PubMed" }],
     recipient: "reader@example.test",
-    transport: async () => ({ messageId: `send-${++sends}` }),
+    transport: async (message) => { sends += 1; return { messageId: message.messageId, accepted: true, acceptedCount: 1 }; },
     config: { llmClient: async () => { llmCalls += 1; return { overview: "本轮文献聚焦示例研究主题，并涉及相关对象与研究方法。现有概况仅依据输入标题和摘要。" }; }, llmRuntime: { llm_mode: "real", apiKeyConfigured: true, model: "mock", max_retries: 0 } },
   };
   assert.equal((await runStage5Notification(input)).status, "sent");
@@ -124,12 +125,24 @@ test("force resend reuses the literature overview without another LLM call", asy
 
 test("failed receipt preserves exports and allows retry", async () => {
   const { root, summary } = await fixture();
-  const failed = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport: async () => { throw Object.assign(new Error("mock failure"), { category: "mock_failure" }); }, config: DISABLED_LLM });
-  assert.deepEqual([failed.status, failed.reason], ["failed", "mock_failure"]);
+  const failed = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport: async () => { throw Object.assign(new Error("mock failure"), { code: "EAUTH" }); }, config: DISABLED_LLM });
+  assert.deepEqual([failed.status, failed.reason], ["failed", "eauth"]);
   assert.equal(await fs.readFile(summary.artifacts[0].path, "utf8"), "xlsx");
-  const retried = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport: async () => ({ messageId: "retry-ok" }), config: DISABLED_LLM });
+  const retried = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport: async (message) => ({ messageId: message.messageId, accepted: true, acceptedCount: 1 }), config: DISABLED_LLM });
   assert.equal(retried.status, "sent");
-  assert.equal(JSON.parse(await fs.readFile(receiptPathFor(root), "utf8")).messageId, "retry-ok");
+  assert.equal(JSON.parse(await fs.readFile(receiptPathFor(root), "utf8")).messageId, retried.messageId);
+});
+
+test("ambiguous SMTP timeout is unknown and never reported sent or auto-retried", async () => {
+  const { summary } = await fixture();
+  let calls = 0;
+  const transport = async () => { calls += 1; throw Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }); };
+  const first = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport, config: DISABLED_LLM });
+  const second = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport, config: DISABLED_LLM });
+  assert.equal(first.status, "unknown");
+  assert.equal(first.possibleAccepted, true);
+  assert.equal(second.status, "unknown");
+  assert.equal(calls, 1);
 });
 
 test("attachment whitelist path count and size guards reject unsafe manifests", async () => {
@@ -145,7 +158,7 @@ test("receipt atomic rename failure leaves no temporary file", async () => {
   const { root, summary } = await fixture();
   const fsApi = Object.create(fs);
   fsApi.rename = async () => { throw Object.assign(new Error("rename blocked"), { code: "EACCES" }); };
-  const result = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport: async () => ({ messageId: "mock" }), config: { ...DISABLED_LLM, fsApi } });
+  const result = await runStage5Notification({ runSummary: summary, recipient: "reader@example.test", transport: async (message) => ({ messageId: message.messageId, accepted: true, acceptedCount: 1 }), config: { ...DISABLED_LLM, fsApi } });
   assert.equal(result.status, "failed");
   const stage5Dir = path.join(root, "stage5");
   assert.equal((await fs.readdir(stage5Dir)).some((name) => name.endsWith(".tmp")), false);
@@ -156,13 +169,14 @@ test("SMTP transport is injectable and carries text plus attachments without net
   let transportOptions;
   const result = await sendStage5Email({ to: "reader@example.test", subject: "s", html: "<b>x</b>", text: "x", attachments: [{ filename: "周报.xlsx", path: "safe.xlsx" }] }, {
     env: { SMTP_HOST: "smtp.invalid", SMTP_USER: "sender@example.test", SMTP_PASS: "test-only-value" },
-    nodemailerLoader: async () => ({ createTransport: (value) => { transportOptions = value; return { sendMail: async (message) => { options = message; return { messageId: "mock-smtp" }; } }; } }),
+    nodemailerLoader: async () => ({ createTransport: (value) => { transportOptions = value; return { sendMail: async (message) => { options = message; return { messageId: "mock-smtp", accepted: ["reader@example.test"], rejected: [], response: "250 accepted" }; } }; } }),
   });
   assert.equal(result.messageId, "mock-smtp");
   assert.deepEqual(transportOptions, { host: "smtp.invalid", port: 465, secure: true, auth: { user: "sender@example.test", pass: "test-only-value" } });
   assert.equal(options.text, "x");
   assert.equal(options.attachments[0].filename, "周报.xlsx");
   assert.equal(options.from, "sender@example.test");
+  assert.equal(result.accepted, true);
 });
 
 test("Stage5 source has no Zotero imports", async () => {

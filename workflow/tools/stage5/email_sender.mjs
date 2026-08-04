@@ -18,6 +18,15 @@ export async function sendStage5Email(message, { env = process.env, nodemailerLo
   if (!config.configured) throw Object.assign(new Error(config.error), { category: config.missing.length ? "transport_not_configured" : "smtp_config_invalid" });
   const nodemailer = await nodemailerLoader();
   const transporter = nodemailer.createTransport({ host: env.SMTP_HOST, port: config.port, secure: config.secure, auth: { user: env.SMTP_USER, pass: env.SMTP_PASS } });
-  const result = await transporter.sendMail({ from: config.from, to: message.to, subject: message.subject, html: message.html, text: message.text, attachments: message.attachments.map((item) => ({ filename: item.filename, path: item.path })) });
-  return { messageId: String(result?.messageId || "") };
+  const result = await transporter.sendMail({ from: config.from, to: message.to, messageId: message.messageId || undefined, subject: message.subject, html: message.html, text: message.text, attachments: (message.attachments || []).map((item) => ({ filename: item.filename, path: item.path })) });
+  const accepted = Array.isArray(result?.accepted) ? result.accepted : [];
+  const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
+  const responseCode = Number(String(result?.response || "").match(/\b([245]\d\d)\b/)?.[1] || 0) || null;
+  return {
+    messageId: String(result?.messageId || message.messageId || ""),
+    accepted: accepted.length > 0 || (accepted.length === 0 && rejected.length === 0 && Number(responseCode || 0) >= 200 && Number(responseCode || 0) < 300),
+    acceptedCount: accepted.length,
+    rejectedCount: rejected.length,
+    responseCode,
+  };
 }

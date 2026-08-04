@@ -3,6 +3,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 
 import { emailTransportConfig } from "../stage5/email_sender.mjs";
 import { resolveStage5Request } from "../stage5/main.mjs";
@@ -124,9 +125,11 @@ export function buildExecutionPlan(options, { env = process.env, repoRoot = REPO
   childEnv.PAPERECHO_INPUT_HASH = options.recoveryInputHash || canonicalQueryHash({ mode: options.mode, input: options.input || "", feedback: options.feedback || "" });
   childEnv.PAPERECHO_RUN_PROFILE = options.profile;
   childEnv.PAPERECHO_LAUNCHER_ID = `${options.mode}-fixed-launcher/runner`;
+  const runId = options.resume || `${options.mode === "local" ? "local" : "zlf"}-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  childEnv.PAPERECHO_RUN_ID = runId;
   const runtime = options.mode === "local" ? null : buildRuntimeConfig({ cwd: repoRoot, env, argv: [process.execPath, entry, ...args] });
   const runRoot = options.mode === "local" ? path.join(options.outputRoot, "runs") : path.join(runtime.reviewRoot, "runs");
-  return { entry, args, childEnv, cwd: repoRoot, runRoot, emailRequested: Boolean(resolveStage5Request(options.email ? ["--email", options.email] : [], env).recipient) };
+  return { entry, args, childEnv, cwd: repoRoot, runRoot, runId, emailRequested: Boolean(resolveStage5Request(options.email ? ["--email", options.email] : [], env).recipient) };
 }
 
 export async function runPreflight(options, dependencies = {}) {

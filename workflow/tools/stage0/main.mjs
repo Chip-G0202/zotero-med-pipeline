@@ -25,7 +25,7 @@ import { ensureWorkflowStartupReady } from "../lib/workflow_startup_ready.mjs";
 import { writeWorkflowPerformanceSummary } from "./performance_summary.mjs";
 import { buildExportManifest, buildRunSummary, pipelineModeFromBackend } from "../lib/run_summary.mjs";
 import { resolveStage5Request, runStage5Notification } from "../stage5/main.mjs";
-import { recipientHash } from "../stage5/email_receipt.mjs";
+import { receiptPathFor, recipientHash } from "../stage5/email_receipt.mjs";
 import { canonicalQueryHash } from "../stage1/source_state.mjs";
 import { createRunRecoveryCoordinator, resumeRunFromLedger } from "../recovery/run_recovery.mjs";
 import { buildZoteroRecoveryReconcilers } from "../recovery/zotero_reconciliation.mjs";
@@ -224,6 +224,7 @@ export async function runZoteroLiteratureFilter({
   const runRoot = path.join(config.reviewRoot, "runs");
   let runGroupManifestPath = "";
   let monthlyAggregationCompleted = false;
+  let notificationHealthObservations = [];
   let runGroupPipelineMode = pipelineModeFromBackend(env.ZOTERO_BACKEND);
   let housekeeping = { skipped: true, reason: "not_started", warnings: [] };
   const ephemeralRegistry = new EphemeralRegistry({ allowedRoots: [os.tmpdir(), config.researchRoot, config.reviewRoot] });
@@ -257,6 +258,7 @@ export async function runZoteroLiteratureFilter({
     housekeeping = { skipped: true, reason: "housekeeping_start_failed", warnings: [String(error?.message || error)] };
   }
   const completeRunGroup = async (report) => {
+    if (report && typeof report === "object") report.notification_health_observations = notificationHealthObservations;
     if (!ephemeralCleanupDone) {
       ephemeralCleanupDone = true;
       try {
@@ -395,6 +397,7 @@ export async function runZoteroLiteratureFilter({
   }
 
   stages.push(await executeStage(stageDefs.stage1, runSameProcessStage, clock));
+  notificationHealthObservations = Array.isArray(stages.at(-1).data?.report?.notification_health_observations) ? stages.at(-1).data.report.notification_health_observations : [];
   if (stage1Only && stages.at(-1).exitCode === 0) {
     stages.push(skippedStage(stageDefs.zoteroBackendReady.name, stageDefs.zoteroBackendReady.scriptPath, "stage1_only_mode", clock));
     stages.push(skippedStage(stageDefs.stage2.name, stageDefs.stage2.scriptPath, "stage1_only_mode", clock));
@@ -616,8 +619,9 @@ export async function runZoteroLiteratureFilter({
   let stage5Notification = { status: "skipped", reason: "stage4_not_completed", attachments: [] };
   if (stage4Ok) {
     const stage5Request = resolveStage5Request(argv, env);
+    const stage5StateRoot = runStateRoot(runRoot, runId);
     const notificationOperation = recoveryCoordinator && stage5Request.recipient
-      ? await recoveryCoordinator.prepareFileOperation({ type: "notification", targetId: recipientHash(stage5Request.recipient), input: { runId, artifactHash: recoveryCoordinator.store.ledger.artifact.hash }, retryable: false })
+      ? await recoveryCoordinator.prepareFileOperation({ type: "notification", targetId: recipientHash(stage5Request.recipient), targetPath: receiptPathFor(stage5StateRoot), input: { runId, notificationType: "run_summary", artifactHash: recoveryCoordinator.store.ledger.artifact.hash }, retryable: false, intent: { notificationType: "run_summary", eventEpoch: runId } })
       : null;
     let stage4RunSummary = stage4.data?.runSummary || null;
     let literatureItems = stage4.data?.literatureItems || null;
@@ -638,7 +642,7 @@ export async function runZoteroLiteratureFilter({
       });
     }
     stage4RunSummary = { ...stage4RunSummary, pipelineMode: pipelineModeFromBackend(resolvedBackend), finishedAt: stage4RunSummary.finishedAt || iso(clock()) };
-    stage5Notification = await stage5Runner({ runSummary: stage4RunSummary, literatureItems: literatureItems || [], recipient: stage5Request.recipient, forceResend: stage5Request.forceResend, config: { runStateRoot: runStateRoot(runRoot, runId) } });
+    stage5Notification = await stage5Runner({ runSummary: stage4RunSummary, literatureItems: literatureItems || [], recipient: stage5Request.recipient, forceResend: stage5Request.forceResend, config: { runStateRoot: stage5StateRoot, ledgerOperationId: notificationOperation?.idempotencyKey || "" } });
     if (notificationOperation && (stage5Notification.status === "sent" || (stage5Notification.status === "skipped" && stage5Notification.reason === "already_sent"))) {
       await recoveryCoordinator.completeNotification(notificationOperation, stage5Notification);
       await recoveryCoordinator.store.setStage("stage5_notification", "verified", { status: stage5Notification.status });
@@ -676,7 +680,7 @@ export async function runZoteroLiteratureFilter({
     };
   }
   const finalStatus = deriveWorkflowStatus({
-    explicitStatus: stage4Ok && stage5Notification.status !== "failed" ? "completed" : stage4Ok ? "failed_stage5_notification" : "failed_stage4_export",
+    explicitStatus: stage4Ok && ["sent", "skipped"].includes(stage5Notification.status) ? "completed" : stage4Ok ? "failed_stage5_notification" : "failed_stage4_export",
     stages,
     artifacts,
   });
@@ -742,7 +746,7 @@ async function main() {
         },
       });
     } else {
-      const runId = `zlf-${Date.now()}-${randomUUID().slice(0, 8)}`;
+      const runId = String(process.env.PAPERECHO_RUN_ID || `zlf-${Date.now()}-${randomUUID().slice(0, 8)}`);
       const recoveryCoordinator = await createRunRecoveryCoordinator({
         runRoot,
         runId,

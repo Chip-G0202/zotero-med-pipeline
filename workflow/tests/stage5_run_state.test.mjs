@@ -32,7 +32,7 @@ test("receipt and overview are written to the run-scoped state root", async (t) 
     runSummary: ctx.runSummary,
     literatureItems: [{ title: "Fictional paper", grade: "A" }],
     recipient: "reader@example.test",
-    transport: async () => ({ messageId: "mock" }),
+    transport: async (message) => ({ messageId: message.messageId, accepted: true, acceptedCount: 1 }),
     config: { ...disabledLlm, runStateRoot: ctx.stateRoot },
   });
   assert.equal(result.status, "sent");
@@ -49,9 +49,9 @@ test("legacy shared receipt remains readable but new sends write run-scoped stat
   });
   const skipped = await runStage5Notification({ runSummary: ctx.runSummary, recipient: "reader@example.test", transport: async () => { throw new Error("must not send"); }, config: { ...disabledLlm, runStateRoot: ctx.stateRoot } });
   assert.equal(skipped.reason, "already_sent");
-  const resent = await runStage5Notification({ runSummary: ctx.runSummary, recipient: "reader@example.test", forceResend: true, transport: async () => ({ messageId: "new" }), config: { ...disabledLlm, runStateRoot: ctx.stateRoot } });
+  const resent = await runStage5Notification({ runSummary: ctx.runSummary, recipient: "reader@example.test", forceResend: true, transport: async (message) => ({ messageId: message.messageId, accepted: true, acceptedCount: 1 }), config: { ...disabledLlm, runStateRoot: ctx.stateRoot } });
   assert.equal(resent.status, "sent");
-  assert.equal(JSON.parse(await fs.readFile(receiptPathFor(ctx.stateRoot), "utf8")).messageId, "new");
+  assert.equal(JSON.parse(await fs.readFile(receiptPathFor(ctx.stateRoot), "utf8")).messageId, resent.messageId);
 });
 
 test("forced resend reports an expired or missing retained attachment clearly", async (t) => {

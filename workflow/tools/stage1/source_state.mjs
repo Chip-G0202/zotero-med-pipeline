@@ -121,6 +121,18 @@ export function buildSourceState({ previous = null, profile, source, queryHash, 
   };
 }
 
+export function sourceHealthObservations(stateUpdates = []) {
+  return stateUpdates.flatMap((update) => {
+    const state = update?.state;
+    if (!state?.source || !state?.profile || !/^[a-f0-9]{64}$/.test(String(state?.queryHash || ""))) return [];
+    const subject = { source: state.source, profile: state.profile, queryHash: state.queryHash };
+    return [
+      { kind: "source_availability", healthKey: `source:${state.profile}:${state.source}:${state.queryHash}:availability`, degraded: state.health?.availability?.status === "unavailable", subject },
+      { kind: "source_yield", healthKey: `source:${state.profile}:${state.source}:${state.queryHash}:yield`, degraded: state.health?.yield?.anomaly === true, subject },
+    ];
+  });
+}
+
 export async function writeAtomicJson(filePath, value, { fsApi = fs } = {}) {
   await fsApi.mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;

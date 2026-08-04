@@ -6,7 +6,9 @@ import { parseRunnerArgs } from "./args.mjs";
 import { resolveRunnerConfiguration } from "./config_loader.mjs";
 import { EXIT_CODES } from "./constants.mjs";
 import { buildExecutionPlan, runPreflight } from "./preflight.mjs";
-import { validateProductionResult } from "./result_validation.mjs";
+import { extractLastJsonObject, validateProductionResult } from "./result_validation.mjs";
+import { notifyRunFailure } from "../notification/failure_notifier.mjs";
+import { processHealthNotifications } from "../notification/health_notifier.mjs";
 
 const SECRET_NAMES = ["SMTP_PASS", "ZOTERO_API_KEY", "TITLE_TRANSLATION_API_KEY", "PREFERENCE_LEARNING_API_KEY", "EASYSCHOLAR_SECRET_KEY"];
 
@@ -52,6 +54,17 @@ export function formatPreflightSummary(preflight) {
   return `[runner] preflight ${preflight.status}: mode=${preflight.mode} profile=${preflight.profile}${missing ? ` missing=${missing}` : ""}`;
 }
 
+function failedStage(report) {
+  const status = String(report?.status || "").toLowerCase();
+  for (const stage of ["stage1", "stage2", "stage3", "stage4", "stage5"]) if (status.includes(stage)) return stage;
+  const failed = (report?.stages || []).find((stage) => Number(stage?.exitCode || 0) !== 0);
+  return String(failed?.name || (status.includes("orchestrator") ? "orchestrator" : "pipeline")).replace(/_.*/, "");
+}
+
+function notificationSummary(result) {
+  return { status: result?.status || "failed", reason: result?.reason || "notifier_failed", attempted: result?.attempted === true, possibleAccepted: result?.status === "unknown" };
+}
+
 export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const stdout = dependencies.stdout || process.stdout;
   const stderr = dependencies.stderr || process.stderr;
@@ -81,6 +94,27 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   catch (error) {
     stderr.write(`${JSON.stringify({ type: "runner_error", status: "failed", error: redactText(error?.message || error, dependencies.env || process.env) })}\n`);
     return EXIT_CODES.pipeline;
+  }
+  const productionReport = extractLastJsonObject(processResult.stdout);
+  const notificationSchemaV2 = String(resolved.env.PAPERECHO_CONFIG_SCHEMA_VERSION || "") === "2";
+  const recipient = String(options.email || resolved.env.PAPERFLOW_REPORT_TO || resolved.env.NOTIFICATION_EMAIL || "").trim();
+  if (processResult.code !== 0 && notificationSchemaV2 && /^(1|true|yes|on)$/i.test(String(resolved.env.PAPERECHO_FAILURE_NOTIFIER_ENABLED || ""))) {
+    const stage = failedStage(productionReport);
+    if (stage !== "stage5") {
+      try {
+        const notified = await (dependencies.notifyRunFailureImpl || notifyRunFailure)({ runRoot: plan.runRoot, runId: plan.runId, failureStage: stage, errorCategory: String(productionReport?.status || "production_entry_failed"), recipient, env: resolved.env, fsApi: dependencies.fsApi });
+        stdout.write(`${JSON.stringify({ type: "failure_notification", ...notificationSummary(notified) })}\n`);
+      } catch (error) {
+        stdout.write(`${JSON.stringify({ type: "failure_notification", status: "failed", reason: "notifier_internal_error" })}\n`);
+      }
+    }
+  } else if (processResult.code === 0 && notificationSchemaV2 && /^(1|true|yes|on)$/i.test(String(resolved.env.PAPERECHO_HEALTH_NOTIFIER_ENABLED || ""))) {
+    try {
+      const health = await (dependencies.processHealthNotificationsImpl || processHealthNotifications)({ runRoot: plan.runRoot, runId: plan.runId, observations: productionReport?.notification_health_observations || [], recipient, env: resolved.env, fsApi: dependencies.fsApi });
+      stdout.write(`${JSON.stringify({ type: "health_notifications", status: health.status, eventCount: health.events?.length || 0, maxNotifications: health.maxNotifications || 0 })}\n`);
+    } catch {
+      stdout.write(`${JSON.stringify({ type: "health_notifications", status: "failed", reason: "health_notifier_internal_error" })}\n`);
+    }
   }
   const validation = await (dependencies.validateProductionResultImpl || validateProductionResult)({ options, plan, processResult, fsApi: dependencies.fsApi });
   stdout.write(`${JSON.stringify({ type: "result", ...validation })}\n`);

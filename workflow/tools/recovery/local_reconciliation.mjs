@@ -4,6 +4,7 @@ import { getLiteratureIdentityKeys } from "../lib/literature_identity.mjs";
 import { LocalRepository } from "../local/local_repository.mjs";
 import { createFileReconciler, createWorkbookReconciler } from "./reconciliation.mjs";
 import { hashFile } from "./operation_ledger.mjs";
+import { writeNotificationReceipt } from "../stage5/email_receipt.mjs";
 
 function artifactItems(artifact) {
   return Array.isArray(artifact) ? artifact : Array.isArray(artifact?.items) ? artifact.items : [];
@@ -86,10 +87,15 @@ export function buildLocalRecoveryReconcilers({ store, artifact, outputRoot, sha
     export: exportReconciler,
     notification: {
       async observe(operation) {
-        if (operation.status !== "verified") return { state: "absent", evidence: { reason: "receipt_state_not_recoverable_in_v2_1" } };
         try {
-          const receipt = JSON.parse(await fsApi.readFile(operation.target.receiptPath, "utf8"));
-          const matches = receipt.schemaVersion === 1 && receipt.runId === store.ledger.runId && receipt.status === "sent"
+          const receipt = JSON.parse(await fsApi.readFile(operation.target.receiptPath || operation.target.path, "utf8"));
+          if (receipt.schemaVersion === 2 && receipt.status === "pending" && receipt.attempts > 0) {
+            const uncertain = { ...receipt, status: "unknown", updatedAt: new Date().toISOString(), lastSmtp: { outcome: "unknown", category: "interrupted_after_attempt_started", responseCode: null, acceptedCount: 0, rejectedCount: 0 } };
+            await writeNotificationReceipt(operation.target.receiptPath || operation.target.path, uncertain, { fsApi });
+            return { state: "ambiguous", evidence: { reason: "notification_possibly_accepted" } };
+          }
+          if (receipt.schemaVersion === 2 && receipt.status === "unknown") return { state: "ambiguous", evidence: { reason: "notification_possibly_accepted" } };
+          const matches = ((receipt.schemaVersion === 1 && receipt.status === "sent") || (receipt.schemaVersion === 2 && receipt.status === "accepted")) && receipt.runId === store.ledger.runId
             && (!operation.verification?.messageId || receipt.messageId === operation.verification.messageId);
           return matches ? { state: "match", evidence: { receiptPath: operation.target.receiptPath, status: receipt.status } } : { state: "conflict", evidence: { reason: "notification_receipt_changed" } };
         } catch (error) { return error?.code === "ENOENT" ? { state: "absent", evidence: { reason: "notification_receipt_missing" } } : { state: "conflict", evidence: { reason: "notification_receipt_unreadable" } }; }

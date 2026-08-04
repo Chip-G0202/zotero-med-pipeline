@@ -191,7 +191,7 @@ test("invalid, unsupported, unknown, and missing config files fail closed", asyn
   const cli = parse(["--check", "--config", paths.configPath], paths.root);
   const cases = [
     ["{", "CONFIG_JSON_INVALID"],
-    [JSON.stringify({ schemaVersion: 2, mode: "local" }), "CONFIG_SCHEMA_UNSUPPORTED"],
+    [JSON.stringify({ schemaVersion: 3, mode: "local" }), "CONFIG_SCHEMA_UNSUPPORTED"],
     [JSON.stringify({ schemaVersion: 1, mode: "local", local: { enabled: true, apiKey: "forbidden" } }), "CONFIG_FIELD_UNKNOWN"],
   ];
   for (const [raw, code] of cases) {
@@ -214,6 +214,52 @@ test("resolver reloads the file on every invocation for continue semantics", asy
   const second = await resolveRunnerConfiguration(cli, { cwd: paths.root, env: {} });
   assert.equal(first.options.email, "first@example.invalid");
   assert.equal(second.options.email, "second@example.invalid");
+});
+
+test("schema v1 preserves legacy behavior and cannot enable new notifiers", async (t) => {
+  const paths = await fixture(t);
+  await writeConfig(paths.configPath, configFor("local", paths));
+  const resolved = await resolveRunnerConfiguration(parse(["--check", "--config", paths.configPath], paths.root), { cwd: paths.root, env: { PAPERECHO_FAILURE_NOTIFIER_ENABLED: "true", PAPERECHO_HEALTH_NOTIFIER_ENABLED: "true" } });
+  assert.equal(resolved.options.configSummary.schemaVersion, 1);
+  assert.equal(resolved.env.PAPERECHO_CONFIG_SCHEMA_VERSION, "1");
+  assert.equal(resolved.env.PAPERECHO_FAILURE_NOTIFIER_ENABLED, undefined);
+  assert.equal(resolved.env.PAPERECHO_HEALTH_NOTIFIER_ENABLED, undefined);
+});
+
+test("schema v2 enables only configured notification capabilities with safe defaults", async (t) => {
+  const paths = await fixture(t);
+  const config = configFor("local", paths, {
+    schemaVersion: 2,
+    common: {
+      sourceState: { root: "source-state" },
+      notifications: { failure: { enabled: true }, health: { enabled: true, consecutiveThreshold: 2 }, receiptStore: { root: "receipts", retryFailed: true, unknownPolicy: "hold" } },
+      radar: { enabled: true }, integrity: { enabled: true },
+    },
+  });
+  await writeConfig(paths.configPath, config);
+  const resolved = await resolveRunnerConfiguration(parse(["--check", "--config", paths.configPath], paths.root), { cwd: paths.root, env: {} });
+  assert.equal(resolved.env.PAPERECHO_CONFIG_SCHEMA_VERSION, "2");
+  assert.equal(resolved.env.PAPERECHO_FAILURE_NOTIFIER_ENABLED, "true");
+  assert.equal(resolved.env.PAPERECHO_HEALTH_NOTIFIER_ENABLED, "true");
+  assert.equal(resolved.env.PAPERECHO_NOTIFICATION_UNKNOWN_POLICY, "hold");
+  assert.equal(resolved.env.SMTP_HOST, undefined);
+  assert.equal("PAPERECHO_RADAR_ENABLED" in resolved.env, false);
+  assert.equal("PAPERECHO_INTEGRITY_ENABLED" in resolved.env, false);
+  assert.equal(resolved.warnings.length, 2);
+});
+
+test("schema v2 canonical hash excludes secret values", async (t) => {
+  const paths = await fixture(t);
+  await writeConfig(paths.configPath, {
+    schemaVersion: 2, mode: "local",
+    common: { email: { smtp: { passwordEnv: "TEST_SMTP_PASS" } }, notifications: { failure: { enabled: true } } },
+    local: { enabled: true, input: "input.json", outputRoot: "output" },
+  });
+  const cli = parse(["--check", "--config", paths.configPath], paths.root);
+  const first = await resolveRunnerConfiguration(cli, { cwd: paths.root, env: { TEST_SMTP_PASS: "first-secret" } });
+  const second = await resolveRunnerConfiguration(cli, { cwd: paths.root, env: { TEST_SMTP_PASS: "second-secret" } });
+  assert.equal(first.options.recoveryConfigHash, second.options.recoveryConfigHash);
+  assert.equal(JSON.stringify(first.options).includes("first-secret"), false);
 });
 
 test("configuration blocking happens before preflight or production", async (t) => {

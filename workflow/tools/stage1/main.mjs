@@ -264,7 +264,7 @@ export async function runResearchOsPipeline({
         now,
         pipeDir,
         profile: "weekly",
-        sourceStateRoot: path.join(RESEARCH_ROOT, "source_state"),
+        sourceStateRoot: process.env.PAPERECHO_SOURCE_STATE_ROOT || path.join(RESEARCH_ROOT, "source_state"),
       });
   const { sourceSelection, sourceCollectionSummary, rss, db, openalex, retrievalAuditPath = "" } = sourceResult;
   const rssEnabled = sourceSelection.enabled_sources?.includes("rss") ?? false;
@@ -578,6 +578,12 @@ export async function runResearchOsPipeline({
     legacy_alias_for: "med_monthly_synthesis",
   };
   report.stage_timings.total = { status: "completed", ms: Date.now() - totalStarted };
+  const llmHealthSummaries = [report.llm_review_execution_summary, report.preference_learning_execution_summary].filter(Boolean);
+  const llmHealthObserved = llmHealthSummaries.some((summary) => summary.enabled === true && (summary.triggered === true || summary.degraded === true));
+  report.notification_health_observations = [
+    ...(sourceResult.healthObservations || []),
+    ...(llmHealthObserved ? [{ kind: "llm", healthKey: "llm:stage1:preference_and_grade", degraded: llmHealthSummaries.some((summary) => summary.degraded === true), subject: { label: "stage1_llm" } }] : []),
+  ];
   report.stage1_artifact_manifest = buildStage1ArtifactManifest({
     pipelineDay: day,
     pipelineDir: pipeDir,

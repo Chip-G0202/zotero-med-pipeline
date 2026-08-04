@@ -11,7 +11,7 @@ import { buildExportManifest, buildRunSummary } from "../lib/run_summary.mjs";
 import { buildLocalRuntimeConfig } from "../lib/runtime_config.mjs";
 import { generateLiteratureTitleTranslations } from "../lib/title_translation_generation.mjs";
 import { resolveStage5Request, runStage5Notification } from "../stage5/main.mjs";
-import { recipientHash } from "../stage5/email_receipt.mjs";
+import { receiptPathFor, recipientHash } from "../stage5/email_receipt.mjs";
 import { canonicalQueryHash } from "../stage1/source_state.mjs";
 import { createRunRecoveryCoordinator, resumeRunFromLedger } from "../recovery/run_recovery.mjs";
 import { buildLocalRecoveryReconcilers } from "../recovery/local_reconciliation.mjs";
@@ -271,15 +271,16 @@ export async function runLocalPipeline(options = {}, dependencies = {}) {
     });
     const stage5Runner = dependencies.runStage5Notification || runStage5Notification;
     let stage5Notification;
+    const stage5StateRoot = runStateRoot(repository.runsDir, runId);
     const notificationOperation = recoveryCoordinator && options.recipient
-      ? await recoveryCoordinator.prepareFileOperation({ type: "notification", targetId: recipientHash(options.recipient), input: { runId, artifactHash: recoveryCoordinator.store.ledger.artifact.hash }, retryable: false })
+      ? await recoveryCoordinator.prepareFileOperation({ type: "notification", targetId: recipientHash(options.recipient), targetPath: receiptPathFor(stage5StateRoot), input: { runId, notificationType: "run_summary", artifactHash: recoveryCoordinator.store.ledger.artifact.hash }, retryable: false, intent: { notificationType: "run_summary", eventEpoch: runId } })
       : null;
     if (!options.recipient) {
-      stage5Notification = await stage5Runner({ runSummary, literatureItems, recipient: "", forceResend: options.forceResend, config: { runStateRoot: runStateRoot(repository.runsDir, runId) } });
+      stage5Notification = await stage5Runner({ runSummary, literatureItems, recipient: "", forceResend: options.forceResend, config: { runStateRoot: stage5StateRoot } });
       timing.skip("stage5_notification", stage5Notification.reason);
     } else {
-      stage5Notification = await timing.run("stage5_notification", () => stage5Runner({ runSummary, literatureItems, recipient: options.recipient, forceResend: options.forceResend, config: { runStateRoot: runStateRoot(repository.runsDir, runId) } }));
-      if (stage5Notification.status === "failed") throw new Error(`STAGE5_NOTIFICATION_FAILED:${stage5Notification.reason}`);
+      stage5Notification = await timing.run("stage5_notification", () => stage5Runner({ runSummary, literatureItems, recipient: options.recipient, forceResend: options.forceResend, config: { runStateRoot: stage5StateRoot, ledgerOperationId: notificationOperation?.idempotencyKey || "" } }));
+      if (stage5Notification.status !== "sent" && !(stage5Notification.status === "skipped" && stage5Notification.reason === "already_sent")) throw new Error(`STAGE5_NOTIFICATION_${String(stage5Notification.status || "failed").toUpperCase()}:${stage5Notification.reason}`);
     }
     if (notificationOperation && (stage5Notification.status === "sent" || (stage5Notification.status === "skipped" && stage5Notification.reason === "already_sent"))) {
       await recoveryCoordinator.completeNotification(notificationOperation, stage5Notification);
@@ -294,7 +295,7 @@ export async function runLocalPipeline(options = {}, dependencies = {}) {
     businessSucceeded = true;
     if (recoveryCoordinator) await recoveryCoordinator.store.setRunStatus(recoveryCoordinator.store.ledger.operations.every((operation) => operation.status === "verified") ? "completed" : "incomplete");
     await writeTiming(timingPath, finalTimingReport);
-    return { ok: true, run_id: runId, output_root: options.outputRoot, imported: imported.items.length, import_errors: imported.errors, persistence, feedback_events_used: normalizedFeedbackRows.length, export_path: exported.exportAudit.actual_output_path, export_manifest: exportManifest, run_summary: runSummary, stage5_notification: stage5Notification, housekeeping, timing_path: timingPath, timings: finalTimingReport };
+    return { ok: true, run_id: runId, output_root: options.outputRoot, imported: imported.items.length, import_errors: imported.errors, persistence, feedback_events_used: normalizedFeedbackRows.length, export_path: exported.exportAudit.actual_output_path, export_manifest: exportManifest, run_summary: runSummary, stage5_notification: stage5Notification, notification_health_observations: stage1Result.report?.notification_health_observations || [], housekeeping, timing_path: timingPath, timings: finalTimingReport };
   } catch (error) {
     businessError = error;
     if (recoveryCoordinator) await recoveryCoordinator.store.setRunStatus("failed").catch(() => {});
@@ -387,7 +388,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
       }),
     }, dependencies);
   } else {
-    const runId = `local-${new Date().toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`;
+    const runId = String(process.env.PAPERECHO_RUN_ID || `local-${new Date().toISOString().replace(/[-:.]/g, "")}-${randomUUID().slice(0, 8)}`);
     const recoveryCoordinator = await createRunRecoveryCoordinator({ runRoot, runId, mode: "local", profile, launcherId: String(process.env.PAPERECHO_LAUNCHER_ID || "local-controlled-entry"), configHash, inputHash, artifactPath: path.join(runRoot, runId, "input_artifact.json") }, dependencies);
     result = await runLocalPipeline({ ...options, runId, recoveryCoordinator }, dependencies);
   }

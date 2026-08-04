@@ -3,7 +3,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { MODES, PROFILES, RUNNER_SCHEMA_VERSION } from "./constants.mjs";
+import { MODES, PROFILES, RUNNER_SCHEMA_VERSION, SUPPORTED_RUNNER_CONFIG_SCHEMAS } from "./constants.mjs";
 import { canonicalQueryHash } from "../stage1/source_state.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -18,7 +18,15 @@ const SECTION_KEYS = Object.freeze({
   desktop: new Set(["enabled", "zoteroExe", "cliTool", "writebackBatchSize", "startupRetries", "startupIntervalMs", "postStartDelayMs"]),
   web: new Set(["enabled", "apiKeyEnv", "userId", "apiBase", "requestConcurrency"]),
   local: new Set(["enabled", "input", "outputRoot", "feedback"]),
+  sourceState: new Set(["root"]),
+  notifications: new Set(["failure", "health", "receiptStore"]),
+  failure: new Set(["enabled"]),
+  health: new Set(["enabled", "consecutiveThreshold"]),
+  receiptStore: new Set(["root", "retryFailed", "unknownPolicy"]),
+  radar: new Set(["enabled"]),
+  integrity: new Set(["enabled"]),
 });
+const V2_COMMON_KEYS = new Set(["sourceState", "notifications", "radar", "integrity"]);
 
 export class RunnerConfigurationError extends Error {
   constructor(code, message, details = {}) {
@@ -41,10 +49,10 @@ function has(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
 }
 
-function validateKeys(value, section) {
+function validateKeys(value, section, schemaVersion = 1) {
   if (value == null) return {};
   if (!isObject(value)) fail("CONFIG_SECTION_INVALID", `${section} must be an object`, { section });
-  const allowed = SECTION_KEYS[section];
+  const allowed = section === "common" && schemaVersion === 2 ? new Set([...SECTION_KEYS.common, ...V2_COMMON_KEYS]) : SECTION_KEYS[section];
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) fail("CONFIG_FIELD_UNKNOWN", `${section}.${key} is not supported`, { section, field: key });
   }
@@ -77,8 +85,8 @@ function validateEnabledSections(config) {
   }
 }
 
-function validateCommon(common) {
-  const value = validateKeys(common, "common");
+function validateCommon(common, schemaVersion = 1) {
+  const value = validateKeys(common, "common", schemaVersion);
   optionalString(value.projectRoot, "common.projectRoot");
   optionalString(value.journalQualityApiKeyEnv, "common.journalQualityApiKeyEnv");
 
@@ -104,7 +112,31 @@ function validateCommon(common) {
   const cleanup = validateKeys(value.cleanup, "cleanup");
   optionalBoolean(cleanup.enabled, "common.cleanup.enabled");
   optionalInteger(cleanup.retentionDays, "common.cleanup.retentionDays", { min: 0, max: 36500 });
-  return { value, llm, email, smtp, cleanup };
+  let sourceState = {};
+  let notifications = {};
+  let failure = {};
+  let health = {};
+  let receiptStore = {};
+  if (schemaVersion === 2) {
+    sourceState = validateKeys(value.sourceState, "sourceState");
+    optionalString(sourceState.root, "common.sourceState.root");
+    notifications = validateKeys(value.notifications, "notifications");
+    failure = validateKeys(notifications.failure, "failure");
+    optionalBoolean(failure.enabled, "common.notifications.failure.enabled");
+    health = validateKeys(notifications.health, "health");
+    optionalBoolean(health.enabled, "common.notifications.health.enabled");
+    optionalInteger(health.consecutiveThreshold, "common.notifications.health.consecutiveThreshold", { min: 2, max: 20 });
+    receiptStore = validateKeys(notifications.receiptStore, "receiptStore");
+    optionalString(receiptStore.root, "common.notifications.receiptStore.root");
+    optionalBoolean(receiptStore.retryFailed, "common.notifications.receiptStore.retryFailed");
+    optionalString(receiptStore.unknownPolicy, "common.notifications.receiptStore.unknownPolicy");
+    if (receiptStore.unknownPolicy != null && receiptStore.unknownPolicy !== "hold") fail("CONFIG_VALUE_INVALID", "common.notifications.receiptStore.unknownPolicy must be hold", { field: "common.notifications.receiptStore.unknownPolicy" });
+    for (const section of ["radar", "integrity"]) {
+      const reserved = validateKeys(value[section], section);
+      optionalBoolean(reserved.enabled, `common.${section}.enabled`);
+    }
+  }
+  return { value, llm, email, smtp, cleanup, sourceState, notifications, failure, health, receiptStore };
 }
 
 function validatePathSection(mode, raw) {
@@ -163,7 +195,7 @@ async function loadConfigFile({ requestedPath, source, fsApi, cwd }) {
   try { config = JSON.parse(raw); }
   catch (error) { fail("CONFIG_JSON_INVALID", `PaperEcho config JSON is invalid: ${error.message}`, { path: safeConfigPath(requestedPath, cwd) }); }
   if (!isObject(config)) fail("CONFIG_ROOT_INVALID", "PaperEcho config root must be an object");
-  if (config.schemaVersion !== RUNNER_SCHEMA_VERSION) fail("CONFIG_SCHEMA_UNSUPPORTED", `PaperEcho config schemaVersion must be ${RUNNER_SCHEMA_VERSION}`, { schemaVersion: config.schemaVersion ?? null });
+  if (!SUPPORTED_RUNNER_CONFIG_SCHEMAS.has(config.schemaVersion)) fail("CONFIG_SCHEMA_UNSUPPORTED", "PaperEcho config schemaVersion must be 1 or 2", { schemaVersion: config.schemaVersion ?? null });
   for (const key of Object.keys(config)) {
     if (!new Set(["schemaVersion", "mode", "profile", "common", "desktop", "web", "local"]).has(key)) fail("CONFIG_FIELD_UNKNOWN", `top-level field ${key} is not supported`, { field: key });
   }
@@ -218,15 +250,30 @@ export async function resolveRunnerConfiguration(cliOptions, dependencies = {}) 
     warnings.push(`CLI mode ${cliOptions.mode} overrides configured mode ${configSelection.mode}`);
   }
 
-  const common = validateCommon(config?.common);
+  const configSchemaVersion = config?.schemaVersion || 0;
+  const common = validateCommon(config?.common, configSchemaVersion || 1);
   const pathSection = validatePathSection(mode, config?.[mode]);
   const configDir = loaded.configPath ? path.dirname(loaded.configPath) : cwd;
   const effectiveEnv = { ...env };
   const secretStatus = {};
+  effectiveEnv.PAPERECHO_CONFIG_SCHEMA_VERSION = String(configSchemaVersion);
+  for (const name of ["PAPERECHO_FAILURE_NOTIFIER_ENABLED", "PAPERECHO_HEALTH_NOTIFIER_ENABLED", "PAPERECHO_HEALTH_DEGRADATION_THRESHOLD", "PAPERECHO_NOTIFICATION_RECEIPT_ROOT", "PAPERECHO_NOTIFICATION_HEALTH_ROOT", "PAPERECHO_NOTIFICATION_RETRY_FAILED", "PAPERECHO_NOTIFICATION_UNKNOWN_POLICY", "PAPERECHO_SOURCE_STATE_ROOT"]) delete effectiveEnv[name];
 
   if (has(common.value, "projectRoot") && common.value.projectRoot) effectiveEnv.ZOTERO_PROJECT_ROOT = resolveRelative(common.value.projectRoot, configDir);
   if (has(common.cleanup, "enabled")) setEnvValue(effectiveEnv, "PAPERFLOW_CLEANUP_ENABLED", common.cleanup.enabled);
   if (has(common.cleanup, "retentionDays")) setEnvValue(effectiveEnv, "PAPERFLOW_RETENTION_DAYS", common.cleanup.retentionDays);
+  if (configSchemaVersion === 2) {
+    setEnvValue(effectiveEnv, "PAPERECHO_FAILURE_NOTIFIER_ENABLED", common.failure.enabled === true);
+    setEnvValue(effectiveEnv, "PAPERECHO_HEALTH_NOTIFIER_ENABLED", common.health.enabled === true);
+    setEnvValue(effectiveEnv, "PAPERECHO_HEALTH_DEGRADATION_THRESHOLD", common.health.consecutiveThreshold ?? 2);
+    setEnvValue(effectiveEnv, "PAPERECHO_NOTIFICATION_RETRY_FAILED", common.receiptStore.retryFailed !== false);
+    setEnvValue(effectiveEnv, "PAPERECHO_NOTIFICATION_UNKNOWN_POLICY", common.receiptStore.unknownPolicy || "hold");
+    if (common.receiptStore.root) effectiveEnv.PAPERECHO_NOTIFICATION_RECEIPT_ROOT = resolveRelative(common.receiptStore.root, configDir);
+    if (common.sourceState.root) effectiveEnv.PAPERECHO_SOURCE_STATE_ROOT = resolveRelative(common.sourceState.root, configDir);
+    effectiveEnv.PAPERECHO_NOTIFICATION_HEALTH_ROOT = path.join(path.dirname(effectiveEnv.PAPERECHO_NOTIFICATION_RECEIPT_ROOT || effectiveEnv.PAPERECHO_SOURCE_STATE_ROOT || resolveRelative("../review_results/source_state", configDir)), "notification_health");
+    if (common.value.radar?.enabled === true) warnings.push("common.radar is reserved; Radar remains disabled in v2.1");
+    if (common.value.integrity?.enabled === true) warnings.push("common.integrity is reserved; integrity monitoring remains disabled in v2.1");
+  }
   if (has(common.value, "journalQualityApiKeyEnv")) {
     mapSecretReference({ target: effectiveEnv, sourceEnv: env, canonicalName: "EASYSCHOLAR_SECRET_KEY", envName: common.value.journalQualityApiKeyEnv, secretStatus });
   }

@@ -9,6 +9,7 @@ import {
   canonicalQueryHash,
   commitRetrievalTransaction,
   loadSourceState,
+  sourceHealthObservations,
   sourceStatePath,
   writeAtomicJson,
 } from "../tools/stage1/source_state.mjs";
@@ -111,4 +112,14 @@ test("two zero-yield successes do not create a low-cardinality anomaly", () => {
   });
   assert.deepEqual(state.health.yield.successfulSamples, [0, 0]);
   assert.equal(state.health.yield.anomaly, false);
+});
+
+test("availability and yield produce independent health keys without query contents", () => {
+  const queryHash = "d".repeat(64);
+  const state = buildSourceState({ profile: "weekly", source: "rss-test", queryHash, adapterVersion: "test", proposal: { complete: false, failureStage: "request" }, checkedAt: "2026-08-04T00:00:00.000Z" });
+  const observations = sourceHealthObservations([{ state }]);
+  assert.deepEqual(observations.map((item) => item.kind), ["source_availability", "source_yield"]);
+  assert.notEqual(observations[0].healthKey, observations[1].healthKey);
+  assert.equal(observations[0].degraded, true);
+  assert.equal(JSON.stringify(observations).includes("request"), false);
 });
