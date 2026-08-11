@@ -9,7 +9,7 @@
 
 ### 复制后填写
 
-- [`config/paperecho.config.example.json`](../config/paperecho.config.example.json) -> `config/paperecho.config.json`：schema v1 的唯一统一运行配置。后者只保存在本机且已被 Git 忽略。
+- [`config/paperecho.config.example.json`](../config/paperecho.config.example.json) -> `config/paperecho.config.json`：统一运行配置；Runner 兼容 schema v1/v2，提交的示例使用 schema v2。后者只保存在本机且已被 Git 忽略。
 
 ### 本地 Secret
 
@@ -43,7 +43,7 @@
 | 路径/来源 | Git | 用户创建或编辑 | 可存 Secret | 读取者/适用路径 | 必需与缺失行为 |
 |---|---|---|---|---|---|
 | `docs/paperecho-setup-template.md` | 提交 | 填写副本或直接提供答案 | 否 | Codex；不被运行时读取 | 可选问卷；缺失不影响 Runner |
-| `config/paperecho.config.example.json` | 提交 | 只复制，不写个人值 | 否 | 示例与验证 | 必须保持有效 JSON、schema v1、三路径默认 disabled |
+| `config/paperecho.config.example.json` | 提交 | 只复制，不写个人值 | 否 | 示例与验证 | 必须保持有效 JSON、schema v2、三路径及可靠性通知默认 disabled |
 | `config/paperecho.config.json` | 忽略 | 是 | 否，只存 secret 环境变量名 | Runner；三路径 | 使用 `--config` 指定却缺失/无效时 blocked；未使用统一文件时 direct Runner 仍需显式 `--mode` |
 | `.env.example` | 提交 | 只复制 | 否 | 环境变量目录 | 可选模板 |
 | `.env` / 进程环境 / secret store | 忽略或外部 | 是 | 是 | env bootstrap、Runner、领域 owner；按功能 | Web key 必需；SMTP/LLM/期刊 key 仅在相应功能被要求时生效或阻塞 |
@@ -67,7 +67,7 @@
 
 | 配置项 | 配置文件字段 | 环境变量 | 必需条件 | 默认值 | Secret | 说明 |
 |---|---|---|---|---|---|---|
-| schema | `schemaVersion` | - | 始终 | `1` | 否 | 仅支持整数 `1` |
+| schema | `schemaVersion` | - | 始终 | 示例为 `2` | 否 | 支持整数 `1`（兼容）和 `2`（可靠性能力） |
 | profile | `profile` | - | 可选 | `standard` | 否 | `standard` 或 `complete` |
 | 项目/共享根 | `common.projectRoot` | `ZOTERO_PROJECT_ROOT` | Desktop/Web 输出或 Local 共享索引需要覆盖时 | 当前项目根 | 否 | JSON 值优先于环境变量 |
 | LLM 开关 | `common.llm.enabled` | - | 可选 | 路径现有默认 | 否 | `false` 强制禁用；Local 未声明时保持旧默认 `disabled` |
@@ -83,6 +83,11 @@
 | SMTP 密码引用 | `common.email.smtp.passwordEnv` | 指向的变量，通常 `SMTP_PASS` | 请求邮件时 | - | 引用否/值是 | 密码值只放 `.env`/secret store |
 | 清理 | `common.cleanup.enabled` | `PAPERFLOW_CLEANUP_ENABLED` | 可选 | `true` | 否 | housekeeping 失败不改变业务结果 |
 | 保留天数 | `common.cleanup.retentionDays` | `PAPERFLOW_RETENTION_DAYS` | cleanup 启用时 | `30` | 否 | `0` 禁用按年龄删除 |
+| 来源状态根 | `common.sourceState.root` | `PAPERECHO_SOURCE_STATE_ROOT` | schema v2 可选 | `review_results/source_state` | 否 | schema v1 不启用新状态能力 |
+| 失败通知 | `common.notifications.failure.enabled` | `PAPERECHO_FAILURE_NOTIFIER_ENABLED` | schema v2 可选 | `false` | 否 | Stage1–4 独立失败通知，默认不发送 |
+| 健康通知 | `common.notifications.health.enabled/consecutiveThreshold` | `PAPERECHO_HEALTH_NOTIFIER_ENABLED` / `PAPERECHO_HEALTH_DEGRADATION_THRESHOLD` | schema v2 可选 | `false` / `2` | 否 | 连续两次降级后通知 |
+| 通知 receipt | `common.notifications.receiptStore.root/retryFailed/unknownPolicy` | `PAPERECHO_NOTIFICATION_RECEIPT_ROOT` 等 | schema v2 可选 | retry `true`、unknown `hold` | 否 | `unknown` 不自动视为 accepted |
+| 预留能力 | `common.radar.enabled` / `common.integrity.enabled` | - | schema v2 可选 | `false` | 否 | v2.1 仅保留字段，不产生 Radar 或 integrity 副作用 |
 
 ## 2. Zotero Desktop 路径配置
 
@@ -176,11 +181,11 @@ node skills/paperecho-local/scripts/run.mjs --check --config config/paperecho.co
 
 显式 `--config` 文件不存在、JSON/schema/字段无效、mode 冲突或当前路径缺配置时，Runner 返回清晰的配置错误或按 `common`/当前路径分组的缺失清单，生产入口调用次数保持为零。补齐本机配置后再次执行同一命令；Skill 场景中回复“继续”会重新读取文件并重新 preflight。
 
-## 10. Schema v1 类型、必需性与失败语义
+## 10. Schema v1/v2 类型、必需性与失败语义
 
 | 字段 | 类型/示例 | standard / complete | 缺失或无效 | 实际 owner / preflight |
 |---|---|---|---|---|
-| `schemaVersion` | integer，固定 `1` | 两者必需 | 非 1、缺失或类型错误均 blocked | config loader |
+| `schemaVersion` | integer，`1` 或 `2` | 两者必需 | 非 1/2、缺失或类型错误均 blocked | config loader |
 | `mode` | `desktop` / `web` / `local` / `null` | 可选，但必须能解析唯一 mode | 无 mode 且非唯一 enabled 时 blocked；非法值 blocked | config loader；fixed launcher 检查冲突 |
 | `profile` | `standard` / `complete` | 可选，默认 standard | 非法值 blocked | config loader/Runner |
 | `common.projectRoot` | path string，如 `..` | 可选 | 回退环境或当前项目；输出根不可写时 blocked | config loader -> runtime config；preflight 检查可写祖先 |
