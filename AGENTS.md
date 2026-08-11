@@ -637,7 +637,7 @@ Desktop/Web run groups live at `review_results/文献评价/runs/<runId>/run_gro
 
 ### Configuration Contract
 
-- Unified Runner configuration uses schema v1 JSON. The committed template is `config/paperecho.config.example.json`; the machine-local `config/paperecho.config.json` is precisely gitignored. `--config` overrides `PAPERECHO_CONFIG`, then the optional default local file is loaded when present.
+- Unified Runner configuration accepts schema v1/v2 JSON. Schema v1 preserves legacy behavior; schema v2 adds the v2.1 reliability settings while new notifications remain disabled by default and Radar/integrity remain inactive. The committed template is `config/paperecho.config.example.json`; the machine-local `config/paperecho.config.json` is precisely gitignored. `--config` overrides `PAPERECHO_CONFIG`, then the optional default local file is loaded when present.
 - Configuration is partitioned into `common`, `desktop`, `web`, and `local`. The resolver lives only in `workflow/tools/runner/config_loader.mjs`; do not add path-specific loaders or duplicate the existing Stage1/search/rule/translation domain JSON owners.
 - Resolution order is CLI -> unified config -> environment/`.env` -> existing domain files/defaults. Mode order is CLI `--mode` -> config `mode` -> exactly one `enabled=true`; never infer mode from backend or secret residue. Fixed path launchers fail closed on a configured different mode.
 - Preflight checks and reports only `common` plus the selected path. Local never requires or probes Zotero; Web never starts Desktop; Desktop never requires Web credentials. On “继续”, the same launcher reloads the config and reruns preflight.
