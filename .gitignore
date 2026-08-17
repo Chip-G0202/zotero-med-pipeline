@@ -26,6 +26,8 @@ tests/*
 !tests/.gitignore
 !tests/full_workflow_benchmark/
 !tests/full_workflow_benchmark/**
+!tests/performance/
+!tests/performance/**
 !tests/helpers/
 !tests/helpers/**
 !tests/journal_quality_gate.test.mjs
