@@ -26,6 +26,17 @@ PaperEcho 不替代研究者作出判断。它负责整理不断传来的文献�
 - **通知更可信。** Stage1–4 中途失败也可独立通知；无法确认邮件是否送达时会保守记录，不会假装成功或默认重复发送。来源或 LLM 连续两次异常才告警，恢复后只通知一次。
 - **老配置继续可用。** schema v1 保持原有行为；schema v2 提供新的可靠性配置，新增通知默认关闭，Radar 不会自动启用。
 
+V2.1 不包含每日 Radar、Weekly queue merge、撤稿/勘误监测、PDF/全文功能，也没有开始 V2.2 的 Desktop/Web/Local 性能优化。
+
+### V2.0
+
+**PaperEcho V2.0** 面向不同的研究环境，扩展了运行方式，也补齐了长期自动运行所需的能力。
+
+- **从单一 Zotero Desktop 扩展为三条路径。** 原有的 Desktop 工作方式继续保留；新增的 Zotero Web API 路径无需保持桌面客户端运行；Standalone Local 则完全脱离 Zotero，通过本地 JSON/JSONL 和报告文件完成处理与交付。
+- **Desktop 从 MCP 迁移至 CLI。** Desktop 减少了中间通信，Web 直接使用 Zotero Web API，Local 在本地独立运行。三条路径共用核心工作流，不再依赖 MCP。
+- **新增邮件通知。** 工作流完成后可按需发送运行结果和报告附件，周期任务结束后不必再手动查看。
+- **加入定期清理，并优化整体性能。** PaperEcho 会清理到期的临时运行产物，同时通过批量读写、减少重复调用和缩短执行链路提升效率。
+
 ## 核心特色
 
 | 特色 | 说明 |
@@ -33,12 +44,13 @@ PaperEcho 不替代研究者作出判断。它负责整理不断传来的文献�
 | Zotero Desktop | 继续使用本机 Zotero 文献库，通过 CLI 完成文献写入和整理。 |
 | Zotero Web API | 连接 Zotero 云端文献库，无需保持桌面客户端运行。 |
 | Standalone Local | 完全脱离 Zotero，通过本地文件完成文献处理和报告交付。 |
-| 多学科文献发现 | 根据研究领域组合 OpenAlex、PubMed/PMC、RSS 或本地文献数据。 |
+| 多学科文献发现 | 根据研究领域组合 OpenAlex、PubMed/PMC、RSS 或本地文献数据，并完整处理分页和重叠查询边界。 |
 | 自动去重与分级 | 识别重复文献，完成 A/B/C/D 分级，把需要判断的内容留给研究者。 |
 | Zotero 写回 | Desktop 和 Web 路径支持集合整理、批量写入和标题翻译回填。 |
 | 本地独立交付 | Local 路径使用 JSON/JSONL 输入，在本地完成处理并生成报告。 |
 | 反馈持续学习 | 将文章反馈和长期筛选标准用于后续筛选，减少重复调整。 |
-| 报告与邮件 | 生成周报和到期月报，并可在完成后发送邮件通知与附件。 |
+| 任务恢复 | 中途失败后可按 runId 继续，并在恢复前核对已完成操作和人工修改。 |
+| 报告与邮件 | 生成周报和到期月报；既可发送完成通知，也可在 Stage1–4 失败时按配置告警。 |
 | 自动维护 | 定期清理到期运行产物，同时保护长期配置、反馈和正式报告。 |
 
 ## Skills
@@ -221,6 +233,17 @@ PaperEcho does not make research judgments for you. It handles the recurring org
 - **Resume after failure:** run the original launcher with `--resume <runId>`. PaperEcho verifies existing Zotero changes, indexes, and generated files before deciding what still needs to run, and reports conflicts instead of overwriting manual edits.
 - **More trustworthy alerts:** Stage1–4 failures can notify independently of Stage5. Ambiguous mail outcomes are not reported as successful or automatically resent. Source or LLM degradation alerts only after two consecutive observations, with one recovery notice.
 - **Backward-compatible configuration:** schema v1 keeps its existing behavior; schema v2 exposes the reliability settings, while new notifications and Radar remain off by default.
+
+V2.1 does not include daily Radar, weekly queue merging, retraction/correction monitoring, PDF or full-text features, or the planned V2.2 Desktop/Web/Local performance work.
+
+### V2.0
+
+**PaperEcho V2.0** adds new ways to run the workflow and the maintenance features needed for long-term automation.
+
+- **From one Zotero Desktop path to three paths:** the original Desktop workflow remains available, joined by a Zotero Web API path that does not require the desktop client to stay open and a Standalone Local path that works entirely through local JSON/JSONL files and reports without Zotero.
+- **A more direct execution model:** Desktop moves from MCP to CLI, Web connects directly through the Zotero Web API, and Local runs independently on the filesystem. All three share the same core workflow without depending on MCP.
+- **Email notification:** completed runs can send result notifications and report attachments when requested.
+- **Scheduled cleanup and performance improvements:** expired temporary run artifacts are cleaned automatically, while batch operations, fewer repeated calls, and shorter execution paths improve overall efficiency.
 
 ## Quick Start
 
