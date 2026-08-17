@@ -202,6 +202,8 @@ test("429 retries remain inside the concurrency limit", async () => {
     assert.equal(peak, 2);
     assert.deepEqual([...attempts.values()], [2, 2, 2, 2]);
     assert.equal(backend._stats.rateLimitCount, 4);
+    assert.equal(backend.getConcurrencySnapshot().current_concurrency, 1);
+    assert.ok(backend.getConcurrencySnapshot().peak_concurrency <= 2);
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -13,6 +13,7 @@
 
 import { ZoteroBackendBase, createVerifyResult, createWriteResult } from "./zotero_backend_base.mjs";
 import { wait } from './async_utils.mjs';
+import { createServiceConcurrencyController, parseServerDelayMs } from "./adaptive_concurrency.mjs";
 import { randomUUID } from "node:crypto";
 
 const ZOTERO_API_BASE = "https://api.zotero.org";
@@ -29,9 +30,10 @@ export function resolveWebApiRequestConcurrency(value, fallback = DEFAULT_REQUES
   return Math.min(MAX_REQUEST_CONCURRENCY, Math.max(1, Math.trunc(parsed)));
 }
 
-export async function mapWithConcurrency(items, concurrency, mapper) {
+export async function mapWithConcurrency(items, concurrency, mapper, { controller = null, observe = true, classifyResult = null } = {}) {
   const source = Array.isArray(items) ? items : [];
   if (!source.length) return [];
+  if (controller) return controller.map(source, mapper, { observe, classifyResult });
   const results = new Array(source.length);
   let cursor = 0;
   const workers = Array.from({ length: Math.min(resolveWebApiRequestConcurrency(concurrency), source.length) }, async () => {
@@ -103,6 +105,11 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
     this.retries = config.retries || DEFAULT_RETRIES;
     this.intervalMs = config.intervalMs || DEFAULT_INTERVAL_MS;
     this.requestConcurrency = resolveWebApiRequestConcurrency(config.requestConcurrency ?? process.env.ZOTERO_WEB_API_REQUEST_CONCURRENCY);
+    this.concurrencyController = config.concurrencyController || createServiceConcurrencyController("zotero_web_api", {
+      minConcurrency: 1,
+      initialConcurrency: this.requestConcurrency,
+      maxConcurrency: this.requestConcurrency,
+    });
     this._resolvedUserId = Boolean(this.userId);
     this._backoffUntil = 0;
     this.libraryVersion = 0;
@@ -117,6 +124,7 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
    * 发送 API 请求
    */
   async _request(method, path, body = null, options = {}) {
+    const requestStartedAt = Date.now();
     // Respect Backoff header: wait if needed
     const now = Date.now();
     if (this._backoffUntil > now) {
@@ -160,24 +168,32 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
         // Process Backoff header (proactive throttling)
         const backoffHeader = response.headers.get("Backoff");
         if (backoffHeader) {
-          const backoffSec = Number(backoffHeader);
-          if (Number.isFinite(backoffSec) && backoffSec > 0) {
-            this._backoffUntil = Date.now() + backoffSec * 1000;
+          const backoffMs = parseServerDelayMs(backoffHeader);
+          if (backoffMs > 0) {
+            this._backoffUntil = Date.now() + backoffMs;
             this._stats.backoffCount++;
+            this.concurrencyController.recordServerDirective({ backoffMs });
           }
         }
 
         if (response.status === 429) {
-          const retryAfter = Number(response.headers.get("Retry-After") || 10) * 1000;
+          const retryAfterHeader = response.headers.get("Retry-After");
+          const retryAfter = retryAfterHeader == null ? 10000 : parseServerDelayMs(retryAfterHeader);
+          this._backoffUntil = Math.max(this._backoffUntil, Date.now() + retryAfter);
           this._stats.retryAfterCount++;
           this._stats.rateLimitCount++;
+          const rateLimitError = Object.assign(new Error("Zotero Web API rate limit"), {
+            status: 429,
+            retryAfterMs: retryAfter,
+            adaptiveRecorded: true,
+          });
+          this.concurrencyController.recordFailure(rateLimitError);
           if (attempt < maxAttempts) {
             await wait(retryAfter);
             continue;
           }
-          const error = new Error(`Rate limited after ${attempt} attempts`);
-          error.status = 429;
-          throw error;
+          rateLimitError.message = `Rate limited after ${attempt} attempts`;
+          throw rateLimitError;
         }
 
         if (!response.ok) {
@@ -191,6 +207,7 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
         const contentType = response.headers.get("Content-Type") || "";
         if (contentType.includes("application/json")) {
           const data = await response.json();
+          this.concurrencyController.recordSuccess(Date.now() - requestStartedAt);
           return {
             ok: true,
             data,
@@ -199,6 +216,7 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
           };
         }
 
+        this.concurrencyController.recordSuccess(Date.now() - requestStartedAt);
         return {
           ok: true,
           data: null,
@@ -207,6 +225,7 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
         };
       } catch (error) {
         lastError = error;
+        if (!error?.adaptiveRecorded) this.concurrencyController.recordFailure(error);
         if (isPreconditionError(error)) throw error;
         if (attempt < maxAttempts) {
           await wait(this.intervalMs);
@@ -286,6 +305,10 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
 
   _requestConcurrency(options = {}) {
     return resolveWebApiRequestConcurrency(options.requestConcurrency, this.requestConcurrency);
+  }
+
+  getConcurrencySnapshot() {
+    return this.concurrencyController.snapshot();
   }
 
   async ensureReady(options = {}) {
@@ -561,7 +584,7 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
         } catch (e) {
           return { itemKey, error: "fetch_failed: " + e.message };
         }
-    });
+    }, { controller: this.concurrencyController, observe: false });
     for (const read of itemReads) {
       if (read.error) result.failed.push({ itemKey: read.itemKey, error: read.error });
       else itemData.set(read.itemKey, { currentCollections: read.currentCollections, version: read.version });
@@ -696,7 +719,7 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
       } catch (error) {
         return { itemKey, error: `fetch_failed: ${error?.message || String(error)}` };
       }
-    });
+    }, { controller: this.concurrencyController, observe: false });
 
     for (const read of itemReads) {
       if (read.error) {
@@ -911,7 +934,10 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
   }
 
   async getItemsDetails(itemKeys = [], mode = "preview", options = {}) {
-    return mapWithConcurrency(itemKeys, this._requestConcurrency(options), (itemKey) => this.getItemDetails(itemKey, mode));
+    return mapWithConcurrency(itemKeys, this._requestConcurrency(options), (itemKey) => this.getItemDetails(itemKey, mode), {
+      controller: this.concurrencyController,
+      observe: false,
+    });
   }
 
   async searchLibrary(options = {}) {

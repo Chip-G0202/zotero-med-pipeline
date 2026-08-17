@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { callJsonLlm, hashText, resolveLlmRuntime } from "../lib/llm_json_support.mjs";
+import { createServiceConcurrencyController } from "../lib/adaptive_concurrency.mjs";
 import { normalizeGradeLetter } from "../lib/grade_primitives.mjs";
 import { synthesizeFinalGrade } from "./semantic_grade_synthesis.mjs";
 
@@ -330,6 +331,7 @@ export async function reviewGradesWithLlm({
   config = {},
   runtime = resolveLlmRuntime(),
   llmClient = null,
+  concurrencyController = null,
   progressCallback = null,
   researchFocusSummary = "",
   ruleContextSummary = null,
@@ -348,6 +350,11 @@ export async function reviewGradesWithLlm({
   const batchConcurrency = Number.isFinite(configuredBatchConcurrency) && configuredBatchConcurrency > 0
     ? Math.max(1, Math.floor(configuredBatchConcurrency))
     : 1;
+  const controller = concurrencyController || createServiceConcurrencyController("llm", {
+    minConcurrency: 1,
+    initialConcurrency: batchConcurrency,
+    maxConcurrency: batchConcurrency,
+  });
   const plannedBatchCount = reviewItems.length ? Math.ceil(reviewItems.length / batchSize) : 0;
   const baseReport = {
     enabled,
@@ -523,6 +530,7 @@ export async function reviewGradesWithLlm({
       cachePath,
       cacheEnabled: config.cache_enabled !== false,
       llmClient,
+      concurrencyController: controller,
     });
     recordLlmCounters(llm);
     const durationMs = Date.now() - batchStarted;
@@ -662,24 +670,14 @@ export async function reviewGradesWithLlm({
         mock_response_used: Boolean(finalResult.llm.mock_response_used),
       });
     }
+    return finalResult;
   };
 
-  if (batchConcurrency <= 1 || batchDescriptors.length <= 1) {
-    for (const descriptor of batchDescriptors) {
-      await processBatch(descriptor);
-    }
-  } else {
-    let cursor = 0;
-    const workerCount = Math.min(batchConcurrency, batchDescriptors.length);
-    const workers = Array.from({ length: workerCount }).map(async () => {
-      while (cursor < batchDescriptors.length) {
-        const descriptor = batchDescriptors[cursor];
-        cursor += 1;
-        await processBatch(descriptor);
-      }
-    });
-    await Promise.all(workers);
-  }
+  await controller.map(batchDescriptors, processBatch, {
+    classifyResult: (result) => result?.ok
+      ? { ok: true }
+      : { ok: false, reason: result?.llm?.error || result?.llm?.blocker || "llm_grade_review_failed" },
+  });
 
   let report;
   {
@@ -730,6 +728,7 @@ export async function reviewGradesWithLlm({
       error: hasFailedBatches ? (failedBatchDiagnostics[failedBatchDiagnostics.length - 1]?.parse_error_summary || "llm_grade_review_failed") : "",
       batch_size: batchSize,
       batch_concurrency: batchConcurrency,
+      adaptive_concurrency: controller.snapshot(),
       batches_attempted: batchesAttempted,
       failed_batch_count: unresolvedFailureDiagnostics.length,
       retry_batch_count: retryBatchCount,
