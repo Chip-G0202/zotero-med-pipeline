@@ -651,17 +651,153 @@ export class ZoteroWebApiBackend extends ZoteroBackendBase {
   }
 
   async addItemsToCollections(operations, options = {}) {
-    const results = [];
-    for (const op of (operations || [])) {
-      const { itemKeys, collectionKey } = op;
-      const result = await this.addItemsToCollection(
-        Array.isArray(itemKeys) ? itemKeys : [itemKeys],
-        collectionKey,
-        options
-      );
-      results.push(result);
+    const { verify = true, skipOnVerifyFailure = true } = options;
+    const result = { added: [], already: [], failed: [], verified: [] };
+    const keysByCollection = new Map();
+
+    for (const operation of Array.isArray(operations) ? operations : []) {
+      const collectionKey = String(operation?.collectionKey || "").trim();
+      const itemKeys = Array.isArray(operation?.itemKeys) ? operation.itemKeys : [operation?.itemKeys];
+      if (!collectionKey) continue;
+      const existing = keysByCollection.get(collectionKey) || [];
+      const seen = new Set(existing);
+      for (const rawKey of itemKeys) {
+        const itemKey = String(rawKey || "").trim();
+        if (itemKey && !seen.has(itemKey)) {
+          existing.push(itemKey);
+          seen.add(itemKey);
+        }
+      }
+      if (existing.length) keysByCollection.set(collectionKey, existing);
     }
-    return results;
+    if (!keysByCollection.size) return result;
+
+    const desiredByItem = new Map();
+    for (const [collectionKey, itemKeys] of keysByCollection) {
+      for (const itemKey of itemKeys) {
+        const desired = desiredByItem.get(itemKey) || [];
+        desired.push(collectionKey);
+        desiredByItem.set(itemKey, desired);
+      }
+    }
+
+    // Read every shared item once, then write its complete collection union once.
+    const itemKeys = [...desiredByItem.keys()];
+    const itemData = new Map();
+    const itemReads = await mapWithConcurrency(itemKeys, this._requestConcurrency(options), async (itemKey) => {
+      try {
+        const itemResult = await this._request("GET", `/items/${itemKey}`);
+        const item = itemResult.data;
+        return {
+          itemKey,
+          currentCollections: Array.isArray(item?.data?.collections) ? item.data.collections : [],
+          version: this._requireVersion(item?.version, "add_to_collections"),
+        };
+      } catch (error) {
+        return { itemKey, error: `fetch_failed: ${error?.message || String(error)}` };
+      }
+    });
+
+    for (const read of itemReads) {
+      if (read.error) {
+        for (const collectionKey of desiredByItem.get(read.itemKey) || []) {
+          result.failed.push({ itemKey: read.itemKey, collectionKey, error: read.error });
+        }
+      } else {
+        itemData.set(read.itemKey, read);
+      }
+    }
+
+    const payload = [];
+    const pendingByItem = new Map();
+    for (const itemKey of itemKeys) {
+      const data = itemData.get(itemKey);
+      if (!data) continue;
+      const current = new Set(data.currentCollections);
+      const pending = [];
+      for (const collectionKey of desiredByItem.get(itemKey) || []) {
+        const association = { itemKey, collectionKey };
+        if (current.has(collectionKey)) result.already.push(association);
+        else {
+          current.add(collectionKey);
+          pending.push(association);
+        }
+      }
+      if (pending.length) {
+        pendingByItem.set(itemKey, pending);
+        payload.push({ key: itemKey, version: data.version, collections: [...current] });
+      }
+    }
+
+    for (let offset = 0; offset < payload.length; offset += MAX_BATCH_SIZE) {
+      const chunk = payload.slice(offset, offset + MAX_BATCH_SIZE);
+      try {
+        const patchResult = await this._request("PATCH", "/items", chunk);
+        const successful = patchResult.data?.successful || {};
+        const unchanged = patchResult.data?.unchanged || {};
+        const failed = patchResult.data?.failed || {};
+        for (let index = 0; index < chunk.length; index += 1) {
+          const itemKey = chunk[index].key;
+          const associations = pendingByItem.get(itemKey) || [];
+          if (successful[String(index)]) result.added.push(...associations);
+          else if (unchanged[String(index)]) result.already.push(...associations);
+          else {
+            const error = failed[String(index)]?.message || "batch_add_result_missing";
+            result.failed.push(...associations.map((association) => ({ ...association, error })));
+          }
+        }
+      } catch (error) {
+        if (isPreconditionError(error)) {
+          for (const entry of chunk) {
+            result.failed.push(...(pendingByItem.get(entry.key) || []).map((association) => ({
+              ...association,
+              error: error?.message || String(error),
+            })));
+          }
+          continue;
+        }
+
+        // A transport/batch failure degrades to one version-guarded write per item,
+        // still applying the complete collection union rather than one write per collection.
+        for (const entry of chunk) {
+          try {
+            await this._request("PATCH", `/items/${entry.key}`, {
+              collections: entry.collections,
+            }, {
+              retries: 1,
+              ifUnmodifiedSinceVersion: entry.version,
+            });
+            result.added.push(...(pendingByItem.get(entry.key) || []));
+          } catch (fallbackError) {
+            result.failed.push(...(pendingByItem.get(entry.key) || []).map((association) => ({
+              ...association,
+              error: fallbackError?.message || String(fallbackError),
+            })));
+          }
+        }
+      }
+    }
+
+    if (verify) {
+      for (const [collectionKey, collectionItemKeys] of keysByCollection) {
+        const failedKeys = new Set(result.failed
+          .filter((failure) => failure.collectionKey === collectionKey)
+          .map((failure) => failure.itemKey));
+        const verifyKeys = collectionItemKeys.filter((itemKey) => !failedKeys.has(itemKey));
+        if (!verifyKeys.length) continue;
+        const verifyResult = await this.verifyItemsInCollection(verifyKeys, collectionKey);
+        result.verified.push(...verifyResult.present.map((itemKey) => ({ itemKey, collectionKey })));
+        for (const itemKey of verifyResult.missing) {
+          result.failed.push({ itemKey, collectionKey, error: "Verification failed: item not in collection" });
+        }
+      }
+    }
+
+    if (result.failed.length && !skipOnVerifyFailure) {
+      const failure = result.failed[0];
+      throw new Error(`add_items_to_collections_failed:${failure.error || failure.itemKey || failure.collectionKey}`);
+    }
+    return result;
   }
 
   async removeItemsFromCollection(itemKeys, collectionKey, options = {}) {
