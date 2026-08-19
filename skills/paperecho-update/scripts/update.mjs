@@ -619,8 +619,10 @@ export async function preflight(options = {}, deps = {}) {
   }
   activeRun = await inspectActiveRun(install.path);
   if (activeRun.active) blockers.push("active_run");
-  const updateAvailable = Boolean(target && current?.currentVersion && compareVersions(parseStableTag(current.currentVersion), target.version) < 0);
-  if (!updateAvailable && !blockers.includes("downgrade_forbidden")) blockers.push("already_latest");
+  const comparableVersion = Boolean(target && current?.currentVersion);
+  const versionComparison = comparableVersion ? compareVersions(parseStableTag(current.currentVersion), target.version) : null;
+  const updateAvailable = versionComparison != null && versionComparison < 0;
+  if (versionComparison === 0) blockers.push("already_latest");
   const safeToApply = blockers.length === 0 && updateAvailable;
   return { status: safeToApply ? "ready" : "blocked", platform: options.platform || process.platform, installPath: install.path, detectionEvidence: install.evidence, currentVersion: current?.currentVersion || null, currentCommit: current?.currentCommit || null, latestStableTag: target?.tag || null, latestCommit: target?.commit || null, updateAvailable, developerCheckout: current?.developerCheckout ?? true, configCompatible: compatibility.compatible === true, stateCompatible: compatibility.compatible === true, contractCompatible: Boolean(staged?.contract), activeRun: activeRun.active, lockfileChanged: staged?.lockfileChanged ?? null, managedChanges: { addCount: plan.addCount, modifyCount: plan.modifyCount, deleteCount: plan.deleteCount }, persistentProtectedCount: staged ? Object.keys(await persistentIntegrity(install.path, staged.contract)).length : 0, conflicts: plan.conflicts, safeToApply, blockers: uniq(blockers), _internal: { install, target, staged, current, plan } };
 }
@@ -717,7 +719,8 @@ export async function main(argv = process.argv.slice(2)) {
   try { options = parseArgs(argv); } catch (error) { process.stderr.write(`${cleanError(error)}\n`); return 2; }
   const report = options.apply ? await applyUpdate(options) : await checkUpdate(options);
   process.stdout.write(options.json ? `${JSON.stringify(report)}\n` : `${JSON.stringify(report, null, 2)}\n`);
-  return report.status === "updated" || report.status === "ready" || report.blockers?.includes("already_latest") ? 0 : 1;
+  const onlyAlreadyLatest = report.blockers?.length === 1 && report.blockers[0] === "already_latest";
+  return report.status === "updated" || report.status === "ready" || onlyAlreadyLatest ? 0 : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) process.exitCode = await main();
