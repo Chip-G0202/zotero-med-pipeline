@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "managedManifestVersion": 1,
+  "sourceRepo": "https://github.com/Chip-G0202/PaperEcho.git",
+  "managedRoots": [
+    "workflow",
+    "skills",
+    "docs"
+  ],
+  "managedFiles": [
+    ".env.example",
+    ".gitignore",
+    "AGENTS.md",
+    "README.md",
+    "package.json",
+    "package-lock.json"
+  ],
+  "managedConfigFiles": [
+    "config/README.md",
+    "config/example-force-run.cmd",
+    "config/paperecho.config.example.json"
+  ],
+  "persistentRoots": [
+    ".paperecho",
+    "config",
+    "logs",
+    "node_modules",
+    "public_release",
+    "research_os",
+    "review_results"
+  ],
+  "persistentFiles": [
+    ".env",
+    ".env.backup",
+    "config.local.json",
+    "config.private.json",
+    "secrets.json",
+    "screening_standards.docx"
+  ],
+  "compatibility": {
+    "configSchemaVersions": [1, 2],
+    "sourceStateSchemaVersions": [1],
+    "operationLedgerSchemaVersions": [1],
+    "notificationReceiptSchemaVersions": [1, 2],
+    "updaterStateSchemaVersions": [1]
+  },
+  "runtime": {
+    "node": ">=18.0.0",
+    "pwsh": ">=7.0.0",
+    "platforms": ["win32", "darwin"]
+  }
+}

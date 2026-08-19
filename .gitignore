@@ -118,3 +118,6 @@ review_results/文献评价/screening_standards.backup.docx
 /review_results/full_workflow_cleanup_summary.json
 /review_results/**/*.tmp
 /review_results/**/*.lock
+
+# PaperEcho updater state, lock, staging metadata, and rollback snapshots
+/.paperecho/update/
