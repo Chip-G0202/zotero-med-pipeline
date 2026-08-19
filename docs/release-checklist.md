@@ -66,6 +66,16 @@
 - Source HTTP、LLM 与 Zotero Web API 分别使用独立的有界自适应并发控制。外部服务出现 429、`Retry-After`、`Backoff`、连续失败或明显延迟恶化时会降低并发，恢复后只缓慢增加，并且不超过既有安全上限。
 - 已验证控制行为不增加请求、retry 或 429，且不改变业务结果；没有独立 Before/After 证据证明自适应并发本身显著降低整体 wall time，因此本版本只声明新增受控自适应并发能力。
 
+### 安全更新与部署
+
+- 新增独立的 `paperecho-update` Skill，官方来源固定为 `Chip-G0202/PaperEcho`。最新版只按数值语义版本选择最新 stable tag，不跟随 `main`、预发布 tag 或其他仓库，也不自动 downgrade。
+- Windows 与 macOS 每次运行都会重新进行有限范围的安装探测；多个可信候选不会自动选择，可用 `--install-dir` 明确指定。check 是默认行为且不写 live，apply 必须显式请求并通过相同 preflight。
+- release 自带的 update contract 区分 managed 程序文件与 persistent 用户状态。`.env`、真实 config、source state、ledger、receipt、lease、artifact、输出和工作文件均受保护；`config/` 中只有明确列出的 example/template 可由 updater 管理。
+- managed 文件采用 OLD/LOCAL/NEW 三方保护，本地修改、目标新增文件碰撞或被修改的删除目标都会阻塞升级。活动中的 PaperEcho run、resume/lease 或另一个 updater lock 同样阻塞，updater 不结束进程。
+- 目标 stable tag 先进入 staging，并校验官方来源、tag/commit、contract、schema 兼容、依赖和最小语法/import smoke。schema 不兼容时不自动迁移；lockfile 不变时不安装依赖，变化时只允许确定性的 `npm ci`。
+- live 修改前建立最小、manifest-backed rollback snapshot；关键失败会恢复 managed 文件与受保护的 tracked persistent 文件，并验证旧版本。只有验证成功才报告已恢复，最近只保留 updater 自己拥有的少量 snapshot。
+- `paperecho-update` 是发布与部署能力，不属于 Stage1–5 文献工作流，也不改变检索、分级、Zotero、副作用、resume、ledger、receipt、adaptive concurrency 或 benchmark 语义。
+
 ### 正确性、已知风险与未包含范围
 
 - cold/warm 三路径的 canonical business output hash 与 normalized side-effect hash 保持一致；LLM 调用量没有增加。比较器排除 runId、时间戳和临时路径等非业务字段，不以文件字节完全相同作为唯一等价标准。
