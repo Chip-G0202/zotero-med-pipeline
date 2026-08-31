@@ -2,7 +2,7 @@
 
 一个面向多学科研究的文献工作流：持续发现、筛选和整理新文献，并按需交付到 Zotero 或本地报告。
 
-[快速开始](#快速开始) | [V2.1 更新](#更新内容) | [目录结构](#目录结构) | [English](#english-version)
+[快速开始](#快速开始) | [V2.2 更新](#更新内容) | [目录结构](#目录结构) | [English](#english-version)
 
 ## 这是什么
 
@@ -18,6 +18,17 @@ PaperEcho 不替代研究者作出判断。它负责整理不断传来的文献�
 
 ## 更新内容
 
+**PaperEcho V2.2** 聚焦三条路径的可验证性能改进，并新增安全更新能力。
+
+- **Web 路径显著减少 Zotero 请求。** 固定 cold benchmark 的总请求从 511 降至 263，其中读取从 489 降至 248、写入从 22 降至 15；候选数量、业务结果和副作用计划保持一致。
+- **Local 热点更快。** Local upsert 的 cold/warm hotspot 分别改善约 39.5% 和 65.8%。这是局部热点收益，不代表整条 Local 路径获得同等比例提升；Desktop 没有发现值得承担风险的稳定热点，因此没有强行修改。
+- **外部调用具备受控自适应并发。** Source HTTP、LLM 和 Zotero Web API 分别使用独立的有界控制器，遇到 429、`Retry-After`、`Backoff`、连续失败或延迟恶化时降低并发，恢复时缓慢增加且不超过原有安全上限。
+- **新增安全更新 Skill。** `paperecho-update` 只从官方 `Chip-G0202/PaperEcho` 选择最新 stable tag，不跟随 `main`。check 默认不写入，apply 必须显式执行；用户配置、secret、运行状态和输出受保护，managed 本地修改或活动任务会阻塞升级，目标版本先在 staging 验证，失败时执行并验证 rollback。
+
+V2.2 不改变检索、分级、Zotero 写回、恢复、通知和报告语义，也不包含每日 Radar、Weekly queue merge、撤稿/勘误监测、PDF 下载或全文分析。
+
+### V2.1
+
 **PaperEcho V2.1** 聚焦检索、写入和通知过程的可靠性，让长期自动运行更不容易漏文献、重复操作或覆盖人工修改。
 
 - **文献获取更完整。** RSS 2.0/Atom 改用正式 XML 解析并支持 ETag、Last-Modified 和 304；PubMed/PMC 会完整翻页、分批获取详情，并用 EDAT/CRDT 重叠窗口降低延迟收录造成的遗漏；OpenAlex 会沿 cursor 取完结果，并为免费接口保留日期重叠。
@@ -26,7 +37,7 @@ PaperEcho 不替代研究者作出判断。它负责整理不断传来的文献�
 - **通知更可信。** Stage1–4 中途失败也可独立通知；无法确认邮件是否送达时会保守记录，不会假装成功或默认重复发送。来源或 LLM 连续两次异常才告警，恢复后只通知一次。
 - **老配置继续可用。** schema v1 保持原有行为；schema v2 提供新的可靠性配置，新增通知默认关闭，Radar 不会自动启用。
 
-V2.1 不包含每日 Radar、Weekly queue merge、撤稿/勘误监测、PDF/全文功能，也没有开始 V2.2 的 Desktop/Web/Local 性能优化。
+V2.1 不包含每日 Radar、Weekly queue merge、撤稿/勘误监测或 PDF/全文功能；Desktop/Web/Local 性能优化见上方 V2.2。
 
 ### V2.0
 
@@ -61,6 +72,7 @@ V2.1 不包含每日 Radar、Weekly queue merge、撤稿/勘误监测、PDF/全�
 | `paperecho-zotero-desktop` | Zotero Desktop | 适合继续使用本机 Zotero 文献库的用户，通过 CLI 执行读写。 |
 | `paperecho-zotero-web` | Zotero Web API | 适合使用 Zotero 云端文献库、无需保持桌面客户端运行的用户。 |
 | `paperecho-local` | Standalone Local | 适合不使用 Zotero、希望通过本地文件完成全部处理和交付的用户。 |
+| `paperecho-update` | 安全更新 | 检查并部署官方最新 stable release，同时保护配置、状态和用户输出。 |
 
 在 Codex 中选择与你的使用方式对应的 Skill，即可进入相应路径。
 
@@ -95,8 +107,10 @@ V2.1 不包含每日 Radar、Weekly queue merge、撤稿/勘误监测、PDF/全�
 │   │   └── scripts/run.mjs
 │   ├── paperecho-zotero-web/
 │   │   └── scripts/run.mjs
-│   └── paperecho-local/
-│       └── scripts/run.mjs
+│   ├── paperecho-local/
+│   │   └── scripts/run.mjs
+│   └── paperecho-update/
+│       └── scripts/update.mjs
 ├── tests/
 │   ├── full_workflow_benchmark/
 │   └── helpers/
@@ -162,6 +176,14 @@ node skills/paperecho-local/scripts/run.mjs --check --config config/paperecho.co
 
 检查通过后，将所选命令中的 `--check` 改为 `--run`。
 
+检查官方 stable 更新可使用 `$paperecho-update`，或运行：
+
+```powershell
+node skills/paperecho-update/scripts/update.mjs --check --json
+```
+
+只有明确需要部署且检查结果为 `safeToApply=true` 时，才将 `--check` 改为 `--apply`。
+
 ## 支持项目
 
 如果 PaperEcho 帮你减少了重复筛选、整理和汇报的时间，可以请我喝杯咖啡，或随手赞赏支持后续维护。
@@ -226,6 +248,17 @@ PaperEcho does not make research judgments for you. It handles the recurring org
 
 ## Update
 
+**PaperEcho V2.2** focuses on measurable performance improvements across the three paths and adds a safe update mechanism.
+
+- **Fewer Zotero requests on Web:** the fixed cold benchmark drops from 511 total requests to 263, with reads reduced from 489 to 248 and writes from 22 to 15, while preserving candidate volume, business output, and side-effect plans.
+- **A faster Local hotspot:** Local upsert improves by about 39.5% cold and 65.8% warm. These are hotspot gains rather than equivalent end-to-end speedups. Desktop showed no stable, low-risk hotspot worth forcing into this release.
+- **Bounded adaptive concurrency:** Source HTTP, LLM, and Zotero Web API use independent controllers that reduce concurrency on 429, `Retry-After`, `Backoff`, repeated failures, or sustained latency degradation, then recover gradually without exceeding existing safety caps.
+- **Safe official updates:** `paperecho-update` selects only the latest stable tag from `Chip-G0202/PaperEcho` and never follows `main`. Checks are read-only by default; apply is explicit. User configuration, secrets, runtime state, and outputs are protected, while managed-file drift or an active run blocks deployment. Targets are validated in staging and critical failures trigger verified rollback.
+
+V2.2 preserves retrieval, grading, Zotero writeback, resume, notification, and reporting semantics. It does not add daily Radar, weekly queue merging, retraction/correction monitoring, PDF downloads, or full-text analysis.
+
+### V2.1
+
 **PaperEcho V2.1** focuses on reliable retrieval, recovery, and notification for long-running workflows.
 
 - **More complete retrieval:** RSS 2.0/Atom now uses a proper XML parser with ETag, Last-Modified, and 304 support. PubMed/PMC exhausts result pages, fetches details in batches, and uses overlapping EDAT/CRDT windows. OpenAlex follows cursor pagination and retains an overlapping publication-date window for the free API path.
@@ -234,7 +267,7 @@ PaperEcho does not make research judgments for you. It handles the recurring org
 - **More trustworthy alerts:** Stage1–4 failures can notify independently of Stage5. Ambiguous mail outcomes are not reported as successful or automatically resent. Source or LLM degradation alerts only after two consecutive observations, with one recovery notice.
 - **Backward-compatible configuration:** schema v1 keeps its existing behavior; schema v2 exposes the reliability settings, while new notifications and Radar remain off by default.
 
-V2.1 does not include daily Radar, weekly queue merging, retraction/correction monitoring, PDF or full-text features, or the planned V2.2 Desktop/Web/Local performance work.
+V2.1 does not include daily Radar, weekly queue merging, retraction/correction monitoring, or PDF/full-text features. The Desktop/Web/Local performance work is described above under V2.2.
 
 ### V2.0
 
@@ -251,6 +284,8 @@ V2.1 does not include daily Radar, weekly queue merging, retraction/correction m
 2. Clone the repository and run `npm install`.
 3. Copy `config/paperecho.config.example.json` to `config/paperecho.config.json` and `.env.example` to `.env`. Choose one path and configure OpenAlex, PubMed/PMC, RSS, or local input for your field.
 4. Use `$paperecho-zotero-desktop`, `$paperecho-zotero-web`, or `$paperecho-local` in Codex. Run the selected launcher with `--check`, then change it to `--run` after the check passes.
+
+To check for an official stable update, use `$paperecho-update` or run `node skills/paperecho-update/scripts/update.mjs --check --json`. Use `--apply` only after an explicit update request and a `safeToApply=true` result.
 
 ## Support the Project
 
