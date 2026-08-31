@@ -1,4 +1,5 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
+import { createServiceConcurrencyController, parseServerDelayMs } from "../lib/adaptive_concurrency.mjs";
 import { buildNcbiESearchUrl, loadOpenAlexConfig, loadPubMedPmcSearchConfig, loadRssSources } from "../lib/literature_config.mjs";
 import { cleanJournalName, inferJournalFromUrlSync } from "../lib/journal_name_cleaner.mjs";
 import {
@@ -12,6 +13,7 @@ import {
 const RSS_ADAPTER_VERSION = "rss-fast-xml-parser-v1";
 const NCBI_ADAPTER_VERSION = "ncbi-esearch-efetch-v1";
 const OPENALEX_ADAPTER_VERSION = "openalex-cursor-v1";
+const SOURCE_HTTP_MAX_CONCURRENCY = 4;
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
@@ -20,6 +22,14 @@ const xmlParser = new XMLParser({
   trimValues: true,
   processEntities: true,
 });
+
+function resolveSourceHttpController(existing = null) {
+  return existing || createServiceConcurrencyController("source_http", {
+    minConcurrency: 1,
+    initialConcurrency: SOURCE_HTTP_MAX_CONCURRENCY,
+    maxConcurrency: SOURCE_HTTP_MAX_CONCURRENCY,
+  });
+}
 
 function asArray(value) {
   if (value == null) return [];
@@ -63,7 +73,13 @@ export async function fetchResponse(url, { timeoutMs = 15000, headers = {}, fetc
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, { signal: controller.signal, redirect: "follow", headers });
-    if (!response.ok && response.status !== 304) throw new Error(`HTTP_${response.status}`);
+    if (!response.ok && response.status !== 304) {
+      const error = new Error(`HTTP_${response.status}`);
+      error.status = response.status;
+      error.retryAfterMs = parseServerDelayMs(responseHeader(response, "Retry-After"));
+      error.backoffMs = parseServerDelayMs(responseHeader(response, "Backoff"));
+      throw error;
+    }
     const body = response.status === 304 ? "" : await response.text();
     return { ok: response.ok, status: response.status, headers: response.headers, text: async () => body };
   } finally {
@@ -74,12 +90,24 @@ export async function fetchResponse(url, { timeoutMs = 15000, headers = {}, fetc
 async function fetchResponseWithRetry(url, options = {}, attempts = 3) {
   let lastError;
   const retryDelayMs = options.retryDelayMs ?? (options.fetchImpl === globalThis.fetch ? 600 : 0);
+  const concurrencyController = options.concurrencyController || null;
   for (let attempt = 1; attempt <= attempts; attempt++) {
+    const startedAt = Date.now();
     try {
-      return await fetchResponse(url, options);
+      const execute = () => fetchResponse(url, options);
+      const response = concurrencyController && options.controllerSlotOwned !== true
+        ? await concurrencyController.run(execute, { observe: false })
+        : await execute();
+      const backoffMs = parseServerDelayMs(responseHeader(response, "Backoff"));
+      if (backoffMs > 0) concurrencyController?.recordServerDirective({ backoffMs });
+      concurrencyController?.recordSuccess(Date.now() - startedAt);
+      return response;
     } catch (error) {
       lastError = error;
-      if (attempt < attempts && retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+      const retryAfterMs = Math.max(0, Number(error?.retryAfterMs || 0));
+      concurrencyController?.recordFailure(error);
+      const delayMs = Math.max(retryAfterMs, retryDelayMs * attempt);
+      if (attempt < attempts && delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
   throw lastError || new Error("UNKNOWN_FETCH_ERROR");
@@ -90,8 +118,8 @@ export async function fetchText(url, timeoutMs = 15000, fetchImpl = globalThis.f
   return response.text();
 }
 
-export async function fetchTextWithRetry(url, attempts = 3, timeoutMs = 15000, fetchImpl = globalThis.fetch) {
-  const response = await fetchResponseWithRetry(url, { timeoutMs, fetchImpl }, attempts);
+export async function fetchTextWithRetry(url, attempts = 3, timeoutMs = 15000, fetchImpl = globalThis.fetch, concurrencyController = null) {
+  const response = await fetchResponseWithRetry(url, { timeoutMs, fetchImpl, concurrencyController }, attempts);
   return response.text();
 }
 
@@ -142,9 +170,10 @@ function rssNamespace(url) {
   return { source: `rss-${canonicalQueryHash(sanitizedUrl).slice(0, 16)}`, queryHash, sanitizedUrl };
 }
 
-export async function fetchRssAll({ root, profile = "weekly", stateRoot = "", fetchImpl = globalThis.fetch, now = new Date() } = {}) {
+export async function fetchRssAll({ root, profile = "weekly", stateRoot = "", fetchImpl = globalThis.fetch, now = new Date(), sourceConcurrencyController = null } = {}) {
   const rssConfig = loadRssSources({ root });
-  const feedResults = await Promise.all(rssConfig.sources.map(async ({ url }) => {
+  const controller = resolveSourceHttpController(sourceConcurrencyController);
+  const feedResults = await controller.map(rssConfig.sources, async ({ url }) => {
     const checkedAt = new Date(now).toISOString();
     const namespace = rssNamespace(url);
     const filePath = sourceStatePath({ stateRoot, profile, source: namespace.source, queryHash: namespace.queryHash });
@@ -156,7 +185,13 @@ export async function fetchRssAll({ root, profile = "weekly", stateRoot = "", fe
     let parsed = [];
     let failure = null;
     try {
-      const response = await fetchResponseWithRetry(url, { timeoutMs: 15000, headers, fetchImpl }, 3);
+      const response = await fetchResponseWithRetry(url, {
+        timeoutMs: 15000,
+        headers,
+        fetchImpl,
+        concurrencyController: controller,
+        controllerSlotOwned: true,
+      }, 3);
       if (response.status === 304) {
         proposal = {
           complete: true,
@@ -188,7 +223,7 @@ export async function fetchRssAll({ root, profile = "weekly", stateRoot = "", fe
       stateUpdate: filePath ? { path: filePath, state } : null,
       audit: { source: namespace.source, queryHash: namespace.queryHash, complete: proposal.complete, notModified: proposal.notModified === true, itemCount: proposal.itemCount || 0, pagesCompleted: proposal.complete ? 1 : 0, failureStage: proposal.failureStage || null },
     };
-  }));
+  }, { observe: false });
   const items = feedResults.flatMap((result) => result.items);
   const failed = feedResults.map((result) => result.failure).filter(Boolean);
   const audit = feedResults.map((result) => result.audit);
@@ -311,7 +346,8 @@ function ncbiIdentity(database, item) {
   return database === "pmc" ? String(item.pmcid || "").replace(/^PMC/i, "") : String(item.pmid || "");
 }
 
-export async function fetchNcbiDatabase(database, cfg, { profile = "weekly", stateRoot = "", fetchImpl = globalThis.fetch, now = new Date() } = {}) {
+export async function fetchNcbiDatabase(database, cfg, { profile = "weekly", stateRoot = "", fetchImpl = globalThis.fetch, now = new Date(), sourceConcurrencyController = null } = {}) {
+  const controller = resolveSourceHttpController(sourceConcurrencyController);
   const effectiveQuery = hasExplicitNcbiDateConstraint(cfg.query) ? cfg.query : (cfg.effective_query || cfg.query);
   const semanticConfig = {
     adapterVersion: NCBI_ADAPTER_VERSION,
@@ -348,7 +384,7 @@ export async function fetchNcbiDatabase(database, cfg, { profile = "weekly", sta
         minDate: window.minDate,
         maxDate: window.maxDate,
       });
-      const json = JSON.parse(await fetchTextWithRetry(url, 3, 20000, fetchImpl));
+      const json = JSON.parse(await fetchTextWithRetry(url, 3, 20000, fetchImpl, controller));
       const result = json?.esearchresult || {};
       const pageIds = Array.isArray(result.idlist) ? result.idlist.map(String) : [];
       expectedCount ??= Number(result.count || 0);
@@ -366,7 +402,7 @@ export async function fetchNcbiDatabase(database, cfg, { profile = "weekly", sta
     for (let offset = 0; offset < ids.length; offset += batchSize) {
       const batch = ids.slice(offset, offset + batchSize);
       const params = new URLSearchParams({ db: database, retmode: "xml", id: batch.join(",") });
-      const xml = await fetchTextWithRetry(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?${params}`, 3, 20000, fetchImpl);
+      const xml = await fetchTextWithRetry(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?${params}`, 3, 20000, fetchImpl, controller);
       const parsed = parseNcbiDetails(xml, database);
       const returned = new Set(parsed.map((item) => ncbiIdentity(database, item)).filter(Boolean));
       const missing = batch.filter((id) => !returned.has(String(id).replace(/^PMC/i, "")));
@@ -403,14 +439,15 @@ export async function fetchNcbiDatabase(database, cfg, { profile = "weekly", sta
   }
 }
 
-export async function fetchPubMed(externalCfg, { root, profile = "weekly", stateRoot = "", fetchImpl = globalThis.fetch, now = new Date() } = {}) {
+export async function fetchPubMed(externalCfg, { root, profile = "weekly", stateRoot = "", fetchImpl = globalThis.fetch, now = new Date(), sourceConcurrencyController = null } = {}) {
   const cfg = externalCfg || loadPubMedPmcSearchConfig({ root, now });
+  const controller = resolveSourceHttpController(sourceConcurrencyController);
   const items = [];
   const failed = [];
   const audit = [];
   const stateUpdates = [];
   for (const database of cfg.databases) {
-    const result = await fetchNcbiDatabase(database, cfg, { profile, stateRoot, fetchImpl, now });
+    const result = await fetchNcbiDatabase(database, cfg, { profile, stateRoot, fetchImpl, now, sourceConcurrencyController: controller });
     items.push(...result.items);
     failed.push(...result.failed);
     audit.push(result.audit);
@@ -496,7 +533,8 @@ export function buildOpenAlexSearchParams(cfg, { cursor = "*", window = null, no
   return `https://api.openalex.org/works?${params}`;
 }
 
-export async function fetchOpenAlex(externalCfg, { root, profile = "weekly", stateRoot = "", fetchImpl = globalThis.fetch, now = new Date() } = {}) {
+export async function fetchOpenAlex(externalCfg, { root, profile = "weekly", stateRoot = "", fetchImpl = globalThis.fetch, now = new Date(), sourceConcurrencyController = null } = {}) {
+  const controller = resolveSourceHttpController(sourceConcurrencyController);
   const cfg = externalCfg || loadOpenAlexConfig({ root });
   if (!cfg.enabled) return { items: [], failed: [], config: cfg, audit: [], stateUpdates: [], skipped_reason: "openalex_disabled" };
   if (!cfg.query) return { items: [], failed: [], config: cfg, audit: [], stateUpdates: [], skipped_reason: "empty_query" };
@@ -523,7 +561,7 @@ export async function fetchOpenAlex(externalCfg, { root, profile = "weekly", sta
   try {
     while (cursor) {
       if (pagesCompleted >= (cfg.max_pages || 10000)) throw new Error("OPENALEX_PAGE_LIMIT_EXCEEDED");
-      const json = JSON.parse(await fetchTextWithRetry(buildOpenAlexSearchParams(cfg, { cursor, window, now }), 3, 20000, fetchImpl));
+      const json = JSON.parse(await fetchTextWithRetry(buildOpenAlexSearchParams(cfg, { cursor, window, now }), 3, 20000, fetchImpl, controller));
       if (!Array.isArray(json?.results)) throw new Error("OPENALEX_RESULTS_INVALID");
       const results = json.results;
       for (const work of results) items.push(normalizeOpenAlexItem(work));
@@ -581,7 +619,8 @@ export async function runSelectedRetrievalSources({
   const fetchRss = fetchers.fetchRssAll || fetchRssAll;
   const fetchPubmed = fetchers.fetchPubMed || fetchPubMed;
   const fetchOpenalex = fetchers.fetchOpenAlex || fetchOpenAlex;
-  const shared = { root, profile, stateRoot, now };
+  const sourceConcurrencyController = resolveSourceHttpController();
+  const shared = { root, profile, stateRoot, now, sourceConcurrencyController };
   const tasks = [
     { key: "rss", enabled: rssEnabled, disabled: { items: [], failed: [], config: { enabled_count: 0, warnings: [] }, audit: [], stateUpdates: [] }, run: () => fetchRss(shared) },
     { key: "db", failureSource: "pubmed", enabled: pubmedEnabled, disabled: { items: [], failed: [], config: { databases: [], warnings: [] }, audit: [], stateUpdates: [] }, run: () => fetchPubmed(pubmedPmcConfig, shared) },

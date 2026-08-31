@@ -93,6 +93,83 @@ test("collection attach bounds detail reads and preserves partial failures", asy
   assert.deepEqual(result.failed, [{ itemKey: "K3", error: "fetch_failed: read_failed" }]);
 });
 
+test("multi-collection attach reads shared items once and writes each final union once", async () => {
+  const backend = new ZoteroWebApiBackend({ userId: "u", apiKey: "k", requestConcurrency: 2 });
+  const reads = new Map();
+  const patchBodies = [];
+  backend._request = async (method, path, body) => {
+    if (method === "GET") {
+      const itemKey = path.split("/").at(-1);
+      reads.set(itemKey, (reads.get(itemKey) || 0) + 1);
+      return {
+        data: {
+          key: itemKey,
+          version: 7,
+          data: { collections: itemKey === "K1" ? ["EXISTING"] : [] },
+        },
+      };
+    }
+    assert.equal(method, "PATCH");
+    assert.equal(path, "/items");
+    patchBodies.push(body);
+    return {
+      data: { successful: Object.fromEntries(body.map((item, index) => [index, { key: item.key }])) },
+    };
+  };
+
+  const result = await backend.addItemsToCollections([
+    { collectionKey: "SRC", itemKeys: ["K1", "K2", "K1"] },
+    { collectionKey: "GRADE", itemKeys: ["K1"] },
+  ], { verify: false });
+
+  assert.deepEqual(Object.fromEntries(reads), { K1: 1, K2: 1 });
+  assert.equal(patchBodies.length, 1);
+  assert.deepEqual(patchBodies[0], [
+    { key: "K1", version: 7, collections: ["EXISTING", "SRC", "GRADE"] },
+    { key: "K2", version: 7, collections: ["SRC"] },
+  ]);
+  assert.deepEqual(result.added, [
+    { itemKey: "K1", collectionKey: "SRC" },
+    { itemKey: "K1", collectionKey: "GRADE" },
+    { itemKey: "K2", collectionKey: "SRC" },
+  ]);
+  assert.deepEqual(result.already, []);
+  assert.deepEqual(result.failed, []);
+});
+
+test("multi-collection attach preserves association failures and optional verification", async () => {
+  const backend = new ZoteroWebApiBackend({ userId: "u", apiKey: "k", requestConcurrency: 2 });
+  backend._request = async (method, path, body) => {
+    if (method === "GET") {
+      const itemKey = path.split("/").at(-1);
+      if (itemKey === "K1") throw new Error("read_failed");
+      return { data: { key: itemKey, version: 3, data: { collections: ["SRC"] } } };
+    }
+    return { data: { successful: Object.fromEntries(body.map((item, index) => [index, { key: item.key }])) } };
+  };
+  const verified = [];
+  backend.verifyItemsInCollection = async (itemKeys, collectionKey) => {
+    verified.push({ itemKeys, collectionKey });
+    return { present: collectionKey === "SRC" ? itemKeys : [], missing: collectionKey === "GRADE" ? itemKeys : [] };
+  };
+
+  const result = await backend.addItemsToCollections([
+    { collectionKey: "SRC", itemKeys: ["K1", "K2"] },
+    { collectionKey: "GRADE", itemKeys: ["K1", "K2"] },
+  ]);
+
+  assert.deepEqual(result.already, [{ itemKey: "K2", collectionKey: "SRC" }]);
+  assert.deepEqual(result.failed, [
+    { itemKey: "K1", collectionKey: "SRC", error: "fetch_failed: read_failed" },
+    { itemKey: "K1", collectionKey: "GRADE", error: "fetch_failed: read_failed" },
+    { itemKey: "K2", collectionKey: "GRADE", error: "Verification failed: item not in collection" },
+  ]);
+  assert.deepEqual(verified, [
+    { itemKeys: ["K2"], collectionKey: "SRC" },
+    { itemKeys: ["K2"], collectionKey: "GRADE" },
+  ]);
+});
+
 test("429 retries remain inside the concurrency limit", async () => {
   const backend = new ZoteroWebApiBackend({ userId: "u", apiKey: "k", requestConcurrency: 2, retries: 2, intervalMs: 1 });
   const attempts = new Map();
@@ -125,6 +202,8 @@ test("429 retries remain inside the concurrency limit", async () => {
     assert.equal(peak, 2);
     assert.deepEqual([...attempts.values()], [2, 2, 2, 2]);
     assert.equal(backend._stats.rateLimitCount, 4);
+    assert.equal(backend.getConcurrencySnapshot().current_concurrency, 1);
+    assert.ok(backend.getConcurrencySnapshot().peak_concurrency <= 2);
   } finally {
     globalThis.fetch = originalFetch;
   }

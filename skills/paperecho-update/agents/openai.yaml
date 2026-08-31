@@ -1,0 +1,8 @@
+interface:
+  display_name: "PaperEcho Update"
+  short_description: "Safely check and deploy stable PaperEcho releases"
+  brand_color: "#2563EB"
+  default_prompt: "Use $paperecho-update to check whether this PaperEcho installation can safely update to the latest official stable release."
+
+policy:
+  allow_implicit_invocation: true

@@ -49,10 +49,13 @@ export function localDedupeKeys(item = {}) {
   return getLiteratureIdentityKeys(item);
 }
 
-export function createLocalPaperId(item = {}) {
-  const seed = localDedupeKeys(item)[0];
+function createLocalPaperIdFromKey(seed) {
   if (!seed) throw new Error("LOCAL_PAPER_IDENTIFIER_MISSING");
   return `lp_${createHash("sha256").update(seed).digest("hex").slice(0, 20)}`;
+}
+
+export function createLocalPaperId(item = {}) {
+  return createLocalPaperIdFromKey(localDedupeKeys(item)[0]);
 }
 
 export async function readFeedbackJsonl(filePath, { tolerateIncompleteTail = true } = {}) {
@@ -118,14 +121,16 @@ export class LocalRepository {
     for (const paper of this.papers) for (const key of localDedupeKeys(paper)) this.index[key] ||= paper.local_id;
   }
 
-  findExisting(item) {
+  findExisting(item, identityKeys = localDedupeKeys(item)) {
+    // The repository's in-memory index is authoritative for its own snapshot and
+    // avoids an O(items × shared-records) scan on every warm upsert.
+    for (const key of identityKeys) {
+      const localId = this.index[key];
+      if (localId) return { exists: true, local_id: localId, matched_by: key.split(":", 1)[0] };
+    }
     const shared = this.sharedIndex ? findLiteratureRecord(this.sharedIndex, item, "local") : null;
     if (shared?.presence?.local?.output_root === this.root) {
       return { exists: true, local_id: shared.presence.local.local_paper_id, matched_by: shared.canonical_id.split(":", 1)[0] };
-    }
-    for (const key of localDedupeKeys(item)) {
-      const localId = this.index[key];
-      if (localId) return { exists: true, local_id: localId, matched_by: key.split(":", 1)[0] };
     }
     return { exists: false };
   }
@@ -135,8 +140,9 @@ export class LocalRepository {
     let created = 0;
     let updated = 0;
     for (const raw of items) {
-      const existing = this.findExisting(raw);
-      const localId = existing.local_id || createLocalPaperId(raw);
+      const identityKeys = localDedupeKeys(raw);
+      const existing = this.findExisting(raw, identityKeys);
+      const localId = existing.local_id || createLocalPaperIdFromKey(identityKeys[0]);
       const previous = byId.get(localId);
       const paper = {
         ...(previous || {}),
@@ -154,7 +160,7 @@ export class LocalRepository {
       delete paper.rating;
       byId.set(localId, paper);
       if (previous) updated += 1; else created += 1;
-      for (const key of localDedupeKeys(paper)) this.index[key] ||= localId;
+      for (const key of identityKeys) this.index[key] ||= localId;
     }
     this.papers = [...byId.values()];
     return { created, updated, total: this.papers.length };

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { parseServerDelayMs } from "./adaptive_concurrency.mjs";
 import { getPreferenceLearningConfig } from "./preference_learning_support.mjs";
 
 export const LLM_JSON_PROMPT_VERSION = "llm-json-v1";
@@ -243,6 +244,8 @@ async function fetchJsonCompletion(runtime, prompt) {
       const text = await res.text().catch(() => "");
       const err = new Error(`HTTP_${res.status}${text ? `:${text.slice(0, 180)}` : ""}`);
       err.status = res.status;
+      err.retryAfterMs = parseServerDelayMs(res.headers.get("Retry-After"));
+      err.backoffMs = parseServerDelayMs(res.headers.get("Backoff"));
       throw err;
     }
     const data = await res.json();
@@ -260,6 +263,7 @@ export async function callJsonLlm({
   cachePath = "",
   cacheEnabled = true,
   llmClient = null,
+  concurrencyController = null,
 } = {}) {
   const llmMode = String(runtime.llm_mode || "real").trim().toLowerCase();
   if (llmMode === "disabled") {
@@ -351,6 +355,7 @@ export async function callJsonLlm({
       }
       return result;
     } catch (error) {
+      concurrencyController?.recordFailure(error);
       lastError = String(error?.message || error);
       lastErrorType = error?.code === "llm_json_parse_failed" ? "llm_json_parse_failed" : "llm_request_failed";
       if (lastErrorType === "llm_json_parse_failed") {
@@ -364,7 +369,9 @@ export async function callJsonLlm({
       const status = Number(error?.status || 0);
       const retryable = status === 429 || status >= 500 || /timeout|abort/i.test(lastError);
       if (!retryable || attempt >= maxRetries) break;
-      await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** attempt)));
+      const localDelay = 500 * (2 ** attempt);
+      const serverDelay = Math.max(Number(error?.retryAfterMs || 0), Number(error?.backoffMs || 0));
+      await new Promise((resolve) => setTimeout(resolve, Math.max(serverDelay, localDelay)));
     }
   }
   return {

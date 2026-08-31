@@ -3,6 +3,7 @@ import fsSync from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServiceConcurrencyController, parseServerDelayMs } from "./adaptive_concurrency.mjs";
 import { registerEphemeral } from "./ephemeral_registry.mjs";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -556,6 +557,8 @@ async function fetchTranslation(runtime, prompt, { maxOutputTokens, stream = run
       const t = await res.text().catch(() => "");
       const err = new Error(`HTTP_${res.status}${t ? `:${t.slice(0, 180)}` : ""}`);
       err.status = res.status;
+      err.retryAfterMs = parseServerDelayMs(res.headers.get("Retry-After"));
+      err.backoffMs = parseServerDelayMs(res.headers.get("Backoff"));
       throw err;
     }
 
@@ -583,6 +586,7 @@ async function fetchTranslation(runtime, prompt, { maxOutputTokens, stream = run
 async function translateWithRuntime(title, {
   runtime = resolveTranslationConfig(),
   rateState = null,
+  concurrencyController = null,
 } = {}) {
   const q = String(title || "").trim();
   if (!q) return { ok: false, zh: q, reason: "empty" };
@@ -630,6 +634,7 @@ async function translateWithRuntime(title, {
       lastErr = "empty_translation";
     } catch (error) {
       lastErr = String(error?.message || error || "unknown");
+      concurrencyController?.recordFailure(error);
       const status = Number(error?.status || 0);
       const retryable = status === 429 || status >= 500 || /abort|timeout/i.test(lastErr);
       const effectiveMax = status === 429 ? maxRetriesFor429 : maxRetries;
@@ -638,7 +643,8 @@ async function translateWithRuntime(title, {
       const baseDelay = status === 429 ? 3000 : 500;
       const backoff = baseDelay * (2 ** attempt);
       const jitter = Math.floor(Math.random() * 1000);
-      await new Promise((resolve) => setTimeout(resolve, backoff + jitter));
+      const serverDelay = Math.max(Number(error?.retryAfterMs || 0), Number(error?.backoffMs || 0));
+      await new Promise((resolve) => setTimeout(resolve, Math.max(serverDelay, backoff + jitter)));
     }
   }
 
@@ -713,7 +719,11 @@ export async function callMimoTranslateBatch(batchItems, {
 
 export async function translateOne(title, options = {}) {
   const runtime = options.runtime || resolveTranslationConfig();
-  const result = await translateWithRuntime(title, { runtime, rateState: options.rateState || null });
+  const result = await translateWithRuntime(title, {
+    runtime,
+    rateState: options.rateState || null,
+    concurrencyController: options.concurrencyController || null,
+  });
   if (result?.ok && String(result.zh || "").trim() && options.onTranslated) {
     try { await options.onTranslated(result.zh); } catch {}
   }
@@ -725,6 +735,7 @@ export async function translateTitlesBatch(titles, concurrency = undefined, {
   translateOneImpl = translateOne,
   batchSize = undefined,
   runtime = resolveTranslationConfig(),
+  concurrencyController = null,
 } = {}) {
   const cache = await loadTranslationCache(cachePath);
   const out = new Map();
@@ -773,6 +784,11 @@ export async function translateTitlesBatch(titles, concurrency = undefined, {
   };
   const rateState = { requestLog: [], tokenLog: [] };
   const requestTimings = [];
+  const controller = concurrencyController || createServiceConcurrencyController("llm", {
+    minConcurrency: 1,
+    initialConcurrency: effectiveConcurrency,
+    maxConcurrency: effectiveConcurrency,
+  });
 
   const missing = [];
   for (const title of uniqTitles) {
@@ -788,44 +804,45 @@ export async function translateTitlesBatch(titles, concurrency = undefined, {
 
   for (let i = 0; i < missing.length; i += usage.batch_size) {
     const batch = missing.slice(i, i + usage.batch_size);
-    let cursor = 0;
-    const workerCount = Math.min(effectiveConcurrency, batch.length);
-    const workers = Array.from({ length: workerCount }).map(async () => {
-      while (cursor < batch.length) {
-        const ref = batch[cursor];
-        const requestIndex = cursor + 1;
-        cursor += 1;
-        const requestStarted = Date.now();
-        let translated;
-        try {
-          translated = await translateOneImpl(ref.title, { runtime, rateState, cachePath });
-        } catch (error) {
-          requestTimings.push({
-            index: requestIndex,
+    const translatedBatch = await controller.map(batch, async (ref, requestIndex) => {
+      const requestStarted = Date.now();
+      try {
+        const translated = await translateOneImpl(ref.title, { runtime, rateState, cachePath, concurrencyController: controller });
+        return {
+          ref,
+          translated,
+          timing: {
+            index: requestIndex + 1,
             title_hash: hashDiagnosticText(ref.title),
             duration_ms: Date.now() - requestStarted,
-            ok: false,
-            error_summary: String(error?.message || error).replace(/\s+/g, " ").trim().slice(0, 160),
-          });
-          throw error;
-        }
-        requestTimings.push({
-          index: requestIndex,
+            ok: Boolean(translated?.ok),
+            error_summary: translated?.ok ? "" : String(translated?.reason || "translation_failed").replace(/\s+/g, " ").trim().slice(0, 160),
+          },
+        };
+      } catch (error) {
+        error.translationTiming = {
+          index: requestIndex + 1,
           title_hash: hashDiagnosticText(ref.title),
           duration_ms: Date.now() - requestStarted,
-          ok: Boolean(translated?.ok),
-          error_summary: translated?.ok ? "" : String(translated?.reason || "translation_failed").replace(/\s+/g, " ").trim().slice(0, 160),
-        });
-        out.set(ref.title, translated);
-        if (translated?.ok && String(translated.zh || "").trim()) {
-          cache.set(ref.key, translated);
-        }
+          ok: false,
+          error_summary: String(error?.message || error).replace(/\s+/g, " ").trim().slice(0, 160),
+        };
+        throw error;
       }
+    }, {
+      classifyResult: ({ translated }) => translated?.ok
+        ? { ok: true }
+        : { ok: false, reason: translated?.reason || "translation_failed", status: translated?.status || 0 },
     });
-    await Promise.all(workers);
+    for (const { ref, translated, timing } of translatedBatch) {
+      requestTimings.push(timing);
+      out.set(ref.title, translated);
+      if (translated?.ok && String(translated.zh || "").trim()) cache.set(ref.key, translated);
+    }
   }
 
   usage.request_timing = summarizeRequestTimings(requestTimings);
+  usage.adaptive_concurrency = controller.snapshot();
   await saveTranslationCache(cachePath, cache);
   return { map: out, usage };
 }
